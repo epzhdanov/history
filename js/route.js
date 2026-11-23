@@ -2,7 +2,7 @@
 
 import { fetchJSON, pool } from "./util.js";
 import { dist, measure, sampleLine, project } from "./geo.js";
-import { wikiNearest, addPages, wikidataNear, describeMinors, nameAll, placeFame } from "./places.js";
+import { wikiNearest, addPages, wikidataNear, describeMinors, nameAll, placeFame, settleCoords } from "./places.js";
 
 const WALK_SPEED = 1.25; // м/с, спокойный шаг
 
@@ -65,9 +65,10 @@ export async function loadAlongRoute({ route, corridor, wikis, ui, signal }) {
 
   const places = [];
   for (const p of map.values()) {
+    settleCoords(p);
     const pr = project(p, line, m);
     if (pr.offset > corridor + 10) continue;
-    Object.assign(p, { along: pr.along, side: pr.side, offset: pr.offset, atStart: pr.along < 25, atEnd: pr.along > m.total - 25 });
+    Object.assign(p, { along: pr.along, side: pr.side, offset: pr.offset, atStart: pr.along < 25, atEnd: pr.along > m.total - 25, behind: pr.beforeStart && pr.offset > 25, beyond: pr.afterEnd && pr.offset > 25 });
     p.dist = pr.along;
     p.score = placeFame(p) + 0.5 * (1 - Math.min(1, pr.offset / Math.max(corridor, 1)));
     places.push(p);
@@ -93,7 +94,7 @@ export async function loadMinorsAlongRoute({ route, corridor, exclude, ui, wikis
   for (const it of seen.values()) {
     const pr = project(it, line, m);
     if (pr.offset > width) continue;
-    near.push({ ...it, along: pr.along, side: pr.side, offset: pr.offset, dist: pr.along });
+    near.push({ ...it, along: pr.along, side: pr.side, offset: pr.offset, dist: pr.along, atStart: pr.along < 25, atEnd: pr.along > m.total - 25, behind: pr.beforeStart && pr.offset > 25, beyond: pr.afterEnd && pr.offset > 25 });
   }
   near.sort((a, b) => a.offset - b.offset);
   const langs = [...new Set([ui, "en", ...wikis])];

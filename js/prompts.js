@@ -158,6 +158,8 @@ function areaLine(ctx) {
 /** Где место находится для слушателя, словами для модели. */
 export function whereFor(p, ctx) {
   if (ctx.mode === "route") {
+    if (p.behind) return `at the very start of the walk, BEHIND the listener (they have to turn around), ${Math.round(p.offset)} m away`;
+    if (p.beyond) return `just past the end of the walk, ${Math.round(p.offset)} m further on`;
     const side = p.side === "left" ? "on the listener's LEFT" : p.side === "right" ? "on the listener's RIGHT" : "directly on the path";
     const when = p.atStart ? "right at the start of the walk" : p.atEnd ? "at the very end of the walk" : `${Math.round(p.along / 10) * 10} m from the start, about ${walkMin(p.along)} min of walking`;
     return `${when}, ${side}, ${Math.round(p.offset)} m from the path`;

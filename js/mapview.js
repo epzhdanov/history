@@ -1,10 +1,10 @@
-// Карта (Leaflet + плитки CARTO на данных OpenStreetMap).
+// Карта (Leaflet + стандартные плитки OpenStreetMap, ключ для них не нужен).
 
 import { h } from "./util.js";
 
 const L = window.L;
-const TILES = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
-const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>';
+const TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
 
 const COBALT = "#173a8c";
 const TRAM = "#ffc629";
@@ -26,7 +26,7 @@ export class MapView {
       worldCopyJump: true,
     });
     this.map.attributionControl.setPrefix(false);
-    L.tileLayer(TILES, { subdomains: "abcd", maxZoom: 20, attribution: ATTRIBUTION, detectRetina: false }).addTo(this.map);
+    L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(this.map);
 
     // Порядок слоёв: радиус, маршрут, места, истории, "я".
     this.areaLayer = L.layerGroup().addTo(this.map);

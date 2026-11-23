@@ -319,6 +319,8 @@ class Session {
 
   whereLabel(p) {
     if (this.cfg.mode === "route") {
+      if (p.behind) return t("pos.behind");
+      if (p.beyond) return t("pos.atEnd");
       if (p.atStart) return t("pos.atStart");
       if (p.atEnd) return t("pos.atEnd");
       return `${t("pos.along", { dist: fmtDist(p.along) })}, ${t(`pos.${p.side}`)}`;

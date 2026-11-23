@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { dist, bearing, measure, pointAlong, sampleLine, project } from "../js/geo.js";
 import { SentenceBuffer, splitSentences } from "../js/speech.js";
-import { trimArticle, wikisFor, addPages, finalize, displayName } from "../js/places.js";
+import { trimArticle, wikisFor, addPages, finalize, displayName, settleCoords } from "../js/places.js";
 
 let passed = 0;
 const test = (name, fn) => {
@@ -146,6 +146,22 @@ test("обрезка статьи оставляет вступление и и�
   // Короткая статья остаётся целой, но без сносок.
   const small = trimArticle("Вступление.\n\n\n== История ==\nБыло дело.\n\n\n== Ссылки ==\nсайт", 3000);
   assert.equal(small, "Вступление.\n\n## История\nБыло дело.");
+});
+
+test("подразделы наследуют важность раздела, служебные разделы выпадают целиком", () => {
+  const filler = "текст ".repeat(300);
+  const article = `Вступление.\n\n\n== Descrição ==\n${filler}\n\n\n== História ==\n\n\n=== Construção ===\nСтроили долго. ${filler}\n\n\n== Sources ==\n\n\n=== Books ===\nкнига ${filler}`;
+  const cut = trimArticle(article, 2500);
+  assert.ok(cut.includes("## Construção"), cut.slice(0, 200));
+  assert.ok(cut.includes("Строили долго"));
+  assert.ok(!cut.includes("Books") && !cut.includes("книга"));
+});
+
+test("из расходящихся координат выбирается точка, с которой согласны другие Википедии", () => {
+  const p = settleCoords({ lat: 38.71282, lon: -9.13891, coords: { pt: { lat: 38.71282, lon: -9.13891 }, en: { lat: 38.71361, lon: -9.13778 }, ru: { lat: 38.7136, lon: -9.1378 } } });
+  assert.ok(Math.abs(p.lat - 38.7136) < 0.0001 && Math.abs(p.lon + 9.1378) < 0.0001, JSON.stringify([p.lat, p.lon]));
+  const two = settleCoords({ lat: 1, lon: 1, coords: { pt: { lat: 1, lon: 1 }, en: { lat: 2, lon: 2 } } });
+  assert.equal(two.lat, 1);
 });
 
 console.log(`\n${passed} проверок пройдено`);

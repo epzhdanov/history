@@ -159,6 +159,7 @@ const STR = {
   "pos.on": { ru: "прямо по пути", en: "right on the way" },
   "pos.along": { ru: "через {dist}", en: "in {dist}" },
   "pos.atStart": { ru: "в самом начале", en: "right at the start" },
+  "pos.behind": { ru: "в самом начале, у вас за спиной", en: "right at the start, behind you" },
   "pos.atEnd": { ru: "в конце пути", en: "at the end of the way" },
 
   // Вопросы

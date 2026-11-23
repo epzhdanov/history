@@ -30,7 +30,7 @@
 | `js/route.js` | пеший маршрут и места вдоль него |
 | `js/geo.js` | расстояния, азимуты, «слева или справа от пути» |
 | `js/speech.js` | чтение вслух и распознавание речи |
-| `js/mapview.js` | карта (Leaflet, плитки CARTO) |
+| `js/mapview.js` | карта (Leaflet, плитки OpenStreetMap) |
 | `js/settings.js` | окно настроек |
 | `js/i18n.js` | тексты интерфейса на русском и английском |
 | `vendor/claude.js` | Anthropic SDK для браузера, сборка из `tools/claude-bundle/` |

@@ -91,15 +91,34 @@ export function addPages(map, lang, pages, source) {
     const key = qid || `${lang}:${page.pageid}`;
     let p = map.get(key);
     if (!p) {
-      p = { id: key, qid, lat: co.lat, lon: co.lon, titles: {}, labels: {}, descs: {}, lens: {}, thumb: null, linkRank: 999, intro: null, kind: "article" };
+      p = { id: key, qid, lat: co.lat, lon: co.lon, coords: {}, titles: {}, labels: {}, descs: {}, lens: {}, thumb: null, linkRank: 999, intro: null, kind: "article" };
       map.set(key, p);
     }
+    p.coords[lang] = { lat: co.lat, lon: co.lon };
     p.titles[lang] = page.title;
     if (page.description) p.descs[lang] = page.description;
     p.lens[lang] = page.length || 0;
     if (!p.thumb && page.thumbnail?.source) p.thumb = page.thumbnail.source;
     if (source === "notable") p.linkRank = Math.min(p.linkRank, rank);
   });
+}
+
+/** Координаты одного места в разных Википедиях иногда расходятся на сотню метров: берём точку, ближайшую к остальным. */
+export function settleCoords(p) {
+  const c = Object.values(p.coords || {});
+  if (c.length < 3) return p;
+  let best = c[0];
+  let bestSum = Infinity;
+  for (const a of c) {
+    const sum = c.reduce((acc, b) => acc + dist(a, b), 0);
+    if (sum < bestSum - 1) {
+      bestSum = sum;
+      best = a;
+    }
+  }
+  p.lat = best.lat;
+  p.lon = best.lon;
+  return p;
 }
 
 const BROAD_TITLE = /^(timeline|list of|history of|lista d|cronologia|história d|historia de|histoire d|geschichte d|список|хронология|история )/i;
@@ -158,6 +177,7 @@ export function placeFame(p) {
 export function finalize(map, center, radius, ui) {
   const out = [];
   for (const p of map.values()) {
+    settleCoords(p);
     p.dist = dist(center, p);
     if (p.dist > radius * 1.03 + 15) continue;
     p.bearing = bearing(center, p);
@@ -371,7 +391,7 @@ export async function loadMinors({ center, radius, exclude, ui, wikis, signal, l
 
 // ---------- Текст статьи для истории ----------
 
-const SKIP_SECTION = /refer|ligações|ver também|see also|external|bibliogra|notes\b|notas|примечани|ссылки|литература|см\. также|galeria|gallery|галерея|further reading|fontes|источники|enlaces|véase|voir aussi|liens|weblinks|einzelnachweise|siehe auch|note\b|collegamenti|voci correlate/i;
+const SKIP_SECTION = /refer|ligações|ver também|see also|external|bibliogra|notes\b|notas|примечани|ссылки|литература|см\. также|galeria|gallery|галерея|further reading|fontes|sources?$|footnote|citations?$|источники|enlaces|véase|voir aussi|liens|weblinks|einzelnachweise|siehe auch|quellen|literatur$|note\b|collegamenti|voci correlate/i;
 const STORY_SECTION = /hist|lend|legend|истори|легенд|curios|trivia|событи|event|origem|origin|происхожд|назван|etimolog|этимолог|toponím|toponim|anecd|mito|myth|geschichte|sage|storia|leggend|histoire|légende|incend|terramoto|earthquake|землетряс|guerra|war\b|войн|revol|револ/i;
 
 /** Убирает из статьи служебные разделы (сноски, ссылки), а если она длиннее бюджета, оставляет вступление и самые "исторические" разделы. */
@@ -380,21 +400,29 @@ export function trimArticle(text, budget) {
   const re = /^(={2,})\s*(.+?)\s*\1\s*$/gm;
   const marks = [];
   let m;
-  while ((m = re.exec(clean))) marks.push({ at: m.index, end: re.lastIndex, title: m[2] });
+  while ((m = re.exec(clean))) marks.push({ at: m.index, end: re.lastIndex, title: m[2], level: m[1].length });
   if (!marks.length) return clean.slice(0, budget);
   const intro = clean.slice(0, marks[0].at).trim();
-  const sections = marks.map((mk, i) => ({
-    title: mk.title,
-    body: clean.slice(mk.end, i + 1 < marks.length ? marks[i + 1].at : clean.length).trim(),
-    order: i,
-  }));
-  const usable = sections.filter((s) => s.body && !SKIP_SECTION.test(s.title));
+  // Подразделы наследуют судьбу раздела: всё внутри "Истории" важно, всё внутри "Примечаний" не нужно.
+  let parent = { skip: false, story: false };
+  const sections = marks.map((mk, i) => {
+    const own = { skip: SKIP_SECTION.test(mk.title), story: STORY_SECTION.test(mk.title) };
+    if (mk.level <= 2) parent = own;
+    return {
+      title: mk.title,
+      body: clean.slice(mk.end, i + 1 < marks.length ? marks[i + 1].at : clean.length).trim(),
+      order: i,
+      skip: own.skip || (mk.level > 2 && parent.skip),
+      story: own.story || (mk.level > 2 && parent.story),
+    };
+  });
+  const usable = sections.filter((s) => s.body && !s.skip);
   const render = (head, list) => [head, ...list.map((s) => `## ${s.title}\n${s.body}`)].filter(Boolean).join("\n\n");
   const whole = render(intro, usable);
   if (whole.length <= budget) return whole;
 
   const head = intro.slice(0, Math.floor(budget * 0.3));
-  const ranked = [...usable.filter((s) => STORY_SECTION.test(s.title)), ...usable.filter((s) => !STORY_SECTION.test(s.title))];
+  const ranked = [...usable.filter((s) => s.story), ...usable.filter((s) => !s.story)];
   const chosen = [];
   let left = budget - head.length;
   for (const s of ranked) {

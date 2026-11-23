@@ -381,7 +381,7 @@ def install(context, claude):
         if request.method == "OPTIONS":
             return route.fulfill(status=204, headers=CORS)
         try:
-            if host.endswith("basemaps.cartocdn.com"):
+            if host == "tile.openstreetmap.org":
                 return route.fulfill(status=200, headers={**CORS, "content-type": "image/png"}, body=TILE)
             if host == "upload.wikimedia.org":
                 return route.fulfill(status=200, headers={**CORS, "content-type": "image/png"}, body=THUMB)
