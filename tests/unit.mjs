@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { dist, bearing, measure, pointAlong, sampleLine, project } from "../js/geo.js";
 import { SentenceBuffer, splitSentences } from "../js/speech.js";
+import { lastJSON, plain } from "../js/util.js";
 import { trimArticle, wikisFor, addPages, finalize, displayName, settleCoords } from "../js/places.js";
 
 let passed = 0;
@@ -162,6 +163,18 @@ test("из расходящихся координат выбирается то
   assert.ok(Math.abs(p.lat - 38.7136) < 0.0001 && Math.abs(p.lon + 9.1378) < 0.0001, JSON.stringify([p.lat, p.lon]));
   const two = settleCoords({ lat: 1, lon: 1, coords: { pt: { lat: 1, lon: 1 }, en: { lat: 2, lon: 2 } } });
   assert.equal(two.lat, 1);
+});
+
+test("JSON достаётся из ответа, даже если вокруг него слова или черновик", () => {
+  assert.deepEqual(lastJSON('{"a":1}'), { a: 1 });
+  assert.deepEqual(lastJSON('Вот ответ:\n{"stories":[{"title":"Скобка } в \\"строке\\""}]}\nГотово.'), { stories: [{ title: 'Скобка } в "строке"' }] });
+  assert.deepEqual(lastJSON('Черновик {"x":1} и итог {"x":2}'), { x: 2 });
+  assert.throws(() => lastJSON("никакого json"));
+});
+
+test("разметка и длинные тире убираются из текста", () => {
+  assert.equal(plain("**Жирный** текст \u2014 и `код`"), "Жирный текст - и код");
+  assert.equal(plain("- Привет, - сказал он."), "- Привет, - сказал он.");
 });
 
 console.log(`\n${passed} проверок пройдено`);

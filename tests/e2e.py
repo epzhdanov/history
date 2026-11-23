@@ -397,6 +397,25 @@ def errors(browser):
 
 
 @scenario
+def api_changes(browser):
+    """API перестал принимать необязательные настройки: приложение отправляет запрос без них и работает дальше."""
+    app = App(browser, store={"audience": "kids", "minutesIdx": 0}, tts_ms=1)
+    app.claude.reject = {"thinking", "effort", "format"}
+    page = app.open()
+    start_session(app)
+    expect(page.locator(".quiz .opt")).to_have_count(3, timeout=20000)
+    expect(page.locator(".story .sent").first).to_be_visible()
+    assert {"thinking.type", "output_config.effort", "output_config.format"} <= set(app.claude.rejected), app.claude.rejected
+    done = [c for c in app.claude.calls if c["kind"] in ("topics", "plan", "story", "quiz_choice")]
+    assert {c["kind"] for c in done} == {"topics", "plan", "story", "quiz_choice"}, app.kinds()
+    assert all(c["thinking"] is None and c["effort"] is None for c in done), [(c["kind"], c["thinking"], c["effort"]) for c in done]
+    bad = [e for e in app.errors if "400" not in e and "favicon" not in e]
+    assert not bad, bad
+    assert not app.claude.problems, app.claude.problems
+    app.close()
+
+
+@scenario
 def denied(browser):
     """Нет доступа к геолокации: подсказка и выбор точки на карте."""
     app = App(browser, geo=None, grant=False)

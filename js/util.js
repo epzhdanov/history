@@ -189,3 +189,43 @@ export function plain(text) {
     .replace(/^\s*[*•]\s+/gm, "")
     .replace(/[—–]/g, "-");
 }
+
+/** Последнее JSON-значение в тексте (на случай, если модель добавила слова вокруг). */
+export function lastJSON(text) {
+  const src = String(text || "");
+  try {
+    return JSON.parse(src);
+  } catch {
+    /* ищем ниже */
+  }
+  let found;
+  for (let i = 0; i < src.length; i++) {
+    if (src[i] !== "{" && src[i] !== "[") continue;
+    let depth = 0;
+    let inStr = false;
+    for (let j = i; j < src.length; j++) {
+      const ch = src[j];
+      if (inStr) {
+        if (ch === "\\") j++;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;
+      else if (ch === "{" || ch === "[") depth++;
+      else if (ch === "}" || ch === "]") {
+        depth--;
+        if (depth === 0) {
+          try {
+            found = JSON.parse(src.slice(i, j + 1));
+            i = j;
+          } catch {
+            /* не JSON, идём дальше */
+          }
+          break;
+        }
+      }
+    }
+  }
+  if (found === undefined) throw new SyntaxError("no json");
+  return found;
+}

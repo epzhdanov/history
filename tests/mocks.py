@@ -265,6 +265,8 @@ class Claude:
         self.calls = []
         self.problems = []
         self.fail_next = None
+        self.reject = set()  # {"thinking", "effort", "format"}: имитация API, который больше не принимает настройку
+        self.rejected = []
 
     def check(self, body, headers):
         model = body.get("model", "")
@@ -321,6 +323,22 @@ class Claude:
         system = body.get("system") or ""
         user = body["messages"][-1]["content"]
         fmt = (body.get("output_config") or {}).get("format")
+        bad = None
+        if "thinking" in self.reject and body.get("thinking"):
+            bad = "thinking.type: this value is not supported for the model"
+        elif "effort" in self.reject and (body.get("output_config") or {}).get("effort"):
+            bad = "output_config.effort: not supported"
+        elif "format" in self.reject and fmt:
+            bad = "output_config.format: structured outputs are not available"
+        if bad:
+            self.rejected.append(bad.split(":")[0])
+            return 400, "application/json", json.dumps({"type": "error", "error": {"type": "invalid_request_error", "message": bad}})
+        wrap = False
+        if not fmt and "matches this JSON schema" in user:
+            # Запасной путь приложения: схема передана словами в запросе.
+            fmt = {"schema": json.loads(user.rsplit("with no other text:\n", 1)[1])}
+            user = user.rsplit("\n\nReturn only one JSON object", 1)[0]
+            wrap = True
         kind = "key"
         en = "Write in English" in system or "in English" in system
         if body.get("stream"):
@@ -334,6 +352,12 @@ class Claude:
             status, payload = self.fail_next
             self.fail_next = None
             return status, "application/json", json.dumps(payload)
+
+        def js(data):
+            text = json.dumps(data, ensure_ascii=False)
+            if wrap:
+                text = f"Вот что получилось:\n{text}\nГотово."
+            return 200, "application/json", json.dumps(message(text, model))
 
         refs = re.findall(r"^(P\d+) \| ([^|\[\n]+)", user, re.M)
         if kind == "story":
@@ -351,22 +375,22 @@ class Claude:
                     {"emoji": "❓", "title": "Bad theme", "hint": "no places", "places": ["P999"]},
                 ]
             }
-            return 200, "application/json", json.dumps(message(json.dumps(data, ensure_ascii=False), model))
+            return js(data)
         if kind == "plan":
             n = int((re.search(r"Plan (\d+) stor", user) or [0, 3])[1])
             told = set(re.findall(r"^- .+ \((.+)\)$", user, re.M))
             pick = [(r, name.strip()) for r, name in refs if name.strip() not in told and name.strip() not in ("Португалия", "Portugal")][:n]
             data = {"stories": [{"place": r, "also": ["M1"] if i == 0 and "M1 |" in user else [], "title": (f"Test story about {name}" if en else f"Тестовая история: {name}"), "idea": "Тестовая идея истории."} for i, (r, name) in enumerate(pick)]}
-            return 200, "application/json", json.dumps(message(json.dumps(data, ensure_ascii=False), model))
+            return js(data)
         if kind == "quiz_choice":
             data = {"question": "What is this story for?" if en else "Для чего нужна эта история?", "options": ["For a test", "For a exam", "For nothing"] if en else ["Для красоты", "Для проверки приложения", "Для экзамена"], "correct": 0 if en else 1, "right_reply": "Yes, it is a test story." if en else "Да, это тестовая история для проверки.", "wrong_reply": "Not quite: it is a test story." if en else "Не совсем: история нужна для проверки приложения."}
-            return 200, "application/json", json.dumps(message(json.dumps(data, ensure_ascii=False), model))
+            return js(data)
         if kind == "quiz_open":
             data = {"question": "What was the story about?" if en else "О чём была эта история?", "answer": "About a test." if en else "О проверке приложения."}
-            return 200, "application/json", json.dumps(message(json.dumps(data, ensure_ascii=False), model))
+            return js(data)
         if kind == "check":
             data = {"verdict": "right", "reply": "Exactly, well done." if en else "Точно, отлично сказано."}
-            return 200, "application/json", json.dumps(message(json.dumps(data, ensure_ascii=False), model))
+            return js(data)
         return 200, "application/json", json.dumps(message("ok", model))
 
 

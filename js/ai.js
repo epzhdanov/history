@@ -1,7 +1,7 @@
 // Обращения к Claude. Ключ пользователя хранится в этом браузере и уходит только в api.anthropic.com.
 
 import Anthropic from "../vendor/claude.js";
-import { store } from "./util.js";
+import { store, lastJSON } from "./util.js";
 import { t } from "./i18n.js";
 import { SCHEMAS, topicsPrompt, planPrompt, storySystem, storyUser, quizPrompt, checkPrompt, chatSystem } from "./prompts.js";
 
@@ -116,52 +116,88 @@ const textOf = (msg) =>
     .map((b) => b.text)
     .join("");
 
+/**
+ * Если API отклонил запрос из-за необязательной настройки (размышления, усилие, формат ответа),
+ * возвращает тот же запрос без неё. Так приложение переживает изменения в правилах API.
+ */
+function relax(params, e) {
+  if (!(e instanceof Anthropic.BadRequestError)) return null;
+  const msg = (e.message || "").toLowerCase();
+  if (params.thinking && msg.includes("thinking")) {
+    const { thinking, ...rest } = params;
+    return rest;
+  }
+  if (params.output_config?.effort && msg.includes("effort")) {
+    const { effort, ...oc } = params.output_config;
+    const { output_config, ...rest } = params;
+    return Object.keys(oc).length ? { ...rest, output_config: oc } : rest;
+  }
+  if (params.output_config?.format && /schema|format|structured/.test(msg)) {
+    // Без строгой схемы: просим JSON словами и разбираем ответ сами.
+    const { format, ...oc } = params.output_config;
+    const { output_config, ...rest } = params;
+    const messages = params.messages.map((m, i) =>
+      i === params.messages.length - 1 ? { ...m, content: `${m.content}\n\nReturn only one JSON object that matches this JSON schema, with no other text:\n${JSON.stringify(format.schema)}` } : m
+    );
+    return { ...rest, messages, ...(Object.keys(oc).length ? { output_config: oc } : {}) };
+  }
+  return null;
+}
+
 /** Ответ строго по JSON-схеме. Обрезанный или неразборчивый ответ пробуем получить ещё раз. */
 async function askJSON({ model, job, system, user, schema, maxTokens, signal }) {
-  let last = new AIError("badjson");
+  const tune = tuning(model, job);
+  let params = {
+    model: MODEL[model],
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: "user", content: user }],
+    ...tune,
+    output_config: { ...tune.output_config, format: { type: "json_schema", schema } },
+  };
+  let relaxed = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
     let msg;
     try {
-      const tune = tuning(model, job);
-      msg = await api().messages.create(
-        {
-          model: MODEL[model],
-          max_tokens: maxTokens,
-          system,
-          messages: [{ role: "user", content: user }],
-          ...tune,
-          output_config: { ...tune.output_config, format: { type: "json_schema", schema } },
-        },
-        { signal }
-      );
+      msg = await api().messages.create(params, { signal });
     } catch (e) {
-      throw normalize(e);
+      const easier = relaxed < 3 ? relax(params, e) : null;
+      if (!easier) throw normalize(e);
+      params = easier;
+      relaxed++;
+      attempt--;
+      continue;
     }
     if (msg.stop_reason === "refusal") throw new AIError("refusal");
     if (msg.stop_reason === "max_tokens") continue;
     try {
-      return JSON.parse(textOf(msg));
+      return lastJSON(textOf(msg));
     } catch {
-      last = new AIError("badjson");
+      /* пробуем ещё раз */
     }
   }
-  throw last;
+  throw new AIError("badjson");
 }
 
 /** Потоковый текст: onDelta получает кусочки по мере появления. Возвращает весь текст. */
 async function streamText({ model, job, system, messages, maxTokens, signal, onDelta }) {
-  try {
-    const stream = api().messages.stream({ model: MODEL[model], max_tokens: maxTokens, system, messages, ...tuning(model, job) }, { signal });
+  let params = { model: MODEL[model], max_tokens: maxTokens, system, messages, ...tuning(model, job) };
+  for (let relaxed = 0; ; relaxed++) {
     let full = "";
-    stream.on("text", (delta) => {
-      full += delta;
-      onDelta?.(delta, full);
-    });
-    const final = await stream.finalMessage();
-    if (final.stop_reason === "refusal" && !full.trim()) throw new AIError("refusal");
-    return full || textOf(final);
-  } catch (e) {
-    throw normalize(e);
+    try {
+      const stream = api().messages.stream(params, { signal });
+      stream.on("text", (delta) => {
+        full += delta;
+        onDelta?.(delta, full);
+      });
+      const final = await stream.finalMessage();
+      if (final.stop_reason === "refusal" && !full.trim()) throw new AIError("refusal");
+      return full || textOf(final);
+    } catch (e) {
+      const easier = !full && relaxed < 2 ? relax(params, e) : null;
+      if (!easier) throw normalize(e);
+      params = easier;
+    }
   }
 }
 
