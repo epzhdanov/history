@@ -302,8 +302,3 @@ export function compassWord(deg) {
   const i = Math.round((((deg % 360) + 360) % 360) / 45) % 8;
   return COMPASS[lang][i];
 }
-
-export function detectLang() {
-  const nav = (navigator.language || "en").toLowerCase();
-  return nav.startsWith("ru") || nav.startsWith("uk") || nav.startsWith("be") ? "ru" : "en";
-}

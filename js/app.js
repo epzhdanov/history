@@ -1,6 +1,6 @@
 // Точка входа: язык, два экрана (карта и истории) и переходы между ними.
 
-import { setLang, detectLang, t } from "./i18n.js";
+import { setLang, t } from "./i18n.js";
 import { store } from "./util.js";
 import { mountHome } from "./home.js";
 import { mountSession } from "./session.js";
@@ -12,7 +12,8 @@ if (location.protocol === "http:" && !local) {
   location.replace(`https://${location.host}${location.pathname}${location.search}${location.hash}`);
 }
 
-setLang(store.get("lang", detectLang()));
+// По умолчанию русский; выбор RU или EN в шапке запоминается.
+setLang(store.get("lang", "ru"));
 document.title = t("app.title");
 
 const root = document.getElementById("app");
