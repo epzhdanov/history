@@ -35,6 +35,12 @@ let coarseFailed = false;
 let slowTimer = null;
 let giveUpTimer = null;
 let permWatch = null;
+let mayReload = () => true;
+
+/** Приложение сообщает, можно ли сейчас перезагрузить страницу саму по себе (нельзя, если человек уже чем-то занят). */
+export function setReloadGuard(fn) {
+  mayReload = fn;
+}
 
 export const isRough = (p) => !!p && p.acc > ROUGH_M;
 
@@ -238,6 +244,13 @@ async function recheckDenied() {
     /* не знаем - не трогаем */
   }
   if (status !== "denied" || state === "denied" || state === "unknown") return;
+  let free = false;
+  try {
+    free = !!mayReload();
+  } catch {
+    /* сомневаемся - не трогаем */
+  }
+  if (!free) return;
   // Запрет сняли, но эта страница его уже запомнила. Перезагрузка лечит; чтобы не зациклиться, не больше двух раз подряд.
   let n = 0;
   try {

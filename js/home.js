@@ -3,7 +3,7 @@
 import { h, icon, store, debounce, toast, clear } from "./util.js";
 import { t, getLang, setLang, fmtDist } from "./i18n.js";
 import { MapView } from "./mapview.js";
-import { startLocation, retryLocation, onLocation, lastKnown, isRough } from "./location.js";
+import { startLocation, retryLocation, onLocation, lastKnown, isRough, setReloadGuard } from "./location.js";
 import { openGeoHelp } from "./geohelp.js";
 import { loadNearby, enrich, loadMinors, reverseGeocode, searchPlaces, describe, wikisFor } from "./places.js";
 import { fetchRoute, loadAlongRoute, loadMinorsAlongRoute, walkMinutes } from "./route.js";
@@ -73,8 +73,13 @@ export function mountHome(root, { onGenerate }) {
   // Примерная геопозиция (точность в километрах) для поиска "что рядом" не годится.
   const usable = () => (S.gps && !isRough(S.gps) ? S.gps : null);
   const center = () => S.manual || usable();
-  // Место не определилось: человеку нужно дать указать его самому.
-  const stuck = () => !center() && (S.gpsSlow || !["idle", "asking"].includes(S.gpsStatus));
+  // Место не определилось: человеку нужно дать указать его самому. Раз показав поиск места,
+  // не прячем его при повторных попытках, иначе поле исчезало бы прямо во время набора.
+  const stuck = () => {
+    if (center()) return (S.wasStuck = false);
+    if (S.gpsSlow || !["idle", "asking"].includes(S.gpsStatus)) S.wasStuck = true;
+    return !!S.wasStuck;
+  };
   const radius = () => RADII[S.radiusIdx];
   const corridor = () => CORRIDORS[S.corridorIdx];
 
@@ -947,6 +952,9 @@ export function mountHome(root, { onGenerate }) {
   });
 
   // ---------- Запуск ----------
+  // Вернувшись из настроек телефона с открытым доступом, страница перезагружается сама, но только пока терять нечего:
+  // место не выбрано вручную, истории не идут, в поиске места ничего не набрано.
+  setReloadGuard(() => S.active && !S.manual && !el.whereBox?.querySelector("input")?.value);
   // Высота таблички нужна стилям: над ней должны оставаться подпись карты и кнопки.
   if (typeof ResizeObserver !== "undefined") {
     new ResizeObserver(() => view.style.setProperty("--plaque-h", `${plaque.offsetHeight}px`)).observe(plaque);

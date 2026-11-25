@@ -499,6 +499,41 @@ def denied(browser):
 
 
 @scenario
+def denied_return(browser):
+    """Человек сходил в настройки телефона и вернулся: страница сама проверяет доступ заново, но не трогает начатую работу."""
+    no = {"after": 30, "error": 1, "message": "User denied Geolocation"}
+    good = {"coarse": fix(*ROSSIO, 25), "fine": fix(*ROSSIO, 10, after=120), "perm": "granted"}
+    back = "() => document.dispatchEvent(new Event('visibilitychange'))"
+
+    # Место уже выбрано вручную: возвращение на страницу ничего не перезагружает.
+    app = App(browser, fake_geo={"coarse": no, "fine": no, "perm": "prompt"}, ua=IPHONE)
+    page = app.open()
+    expect(page.locator(".plaque.warn")).to_contain_text("Нет доступа к геолокации", timeout=8000)
+    box = page.locator("#map").bounding_box()
+    page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    expect(page.locator(".plaque.here .plaque-link")).to_have_text("Вернуться ко мне", timeout=8000)
+    page.evaluate("() => { window.__mark = 1; }")
+    app.set_geo(good)
+    page.wait_for_timeout(3200)
+    page.evaluate(back)
+    page.wait_for_timeout(1200)
+    assert page.evaluate("() => window.__mark") == 1, "страница не должна перезагружаться, пока выбрано место вручную"
+    app.close()
+
+    # Терять нечего: страница перезагружается сама и находит место.
+    app = App(browser, fake_geo={"coarse": no, "fine": no, "perm": "prompt"}, ua=IPHONE)
+    page = app.open()
+    expect(page.locator(".plaque.warn")).to_contain_text("Нет доступа к геолокации", timeout=8000)
+    app.set_geo(good)
+    page.wait_for_timeout(3200)
+    with page.expect_navigation():
+        page.evaluate(back)
+    expect(page.locator(".plaque.here .plaque-name")).to_have_text("Praça Dom Pedro IV", timeout=8000)
+    app.verify()
+    app.close()
+
+
+@scenario
 def denied_then_allowed(browser):
     """Настоящий отказ браузера, потом доступ открыли в настройках. В Chrome место находится само, в Safari - после "Проверить снова"."""
     app = App(browser, geo=None, grant=False)
@@ -606,6 +641,11 @@ def geo_failed(browser):
     expect(page.locator(".plaque.warn")).to_contain_text("Телефон не смог определить место", timeout=8000)
     expect(page.locator(".where-box")).to_be_visible()
     app.shot("20-geo-failed")
+    # Повторная попытка, которая тоже не удалась: поле поиска места и набранный в нём текст остаются на месте.
+    page.locator("#where-q").fill("Praça do")
+    page.get_by_role("button", name="Ещё раз").click()
+    expect(page.locator(".plaque.warn")).to_contain_text("Телефон не смог определить место", timeout=8000)
+    expect(page.locator("#where-q")).to_have_value("Praça do")
     app.set_geo({"coarse": fix(*ROSSIO, 30), "fine": fix(*ROSSIO, 10, after=100), "perm": "granted"})
     page.get_by_role("button", name="Ещё раз").click()
     expect(page.locator(".plaque.here .plaque-name")).to_have_text("Praça Dom Pedro IV", timeout=8000)
@@ -716,6 +756,33 @@ def voice_pause(browser):
     page.wait_for_function(f"() => !window.__audios[0].paused && window.__audios[0].currentTime > {a['time'] + 0.2}", timeout=5000)
     # Скорость речи из настроек
     assert app.audio()["rate"] == 1
+    app.verify()
+    app.close()
+
+
+@scenario
+def voice_interrupt(browser):
+    """Вопрос посреди рассказа с нейросетевым голосом: ответ звучит тем же голосом, потом рассказ продолжается с прерванного места."""
+    app = App(browser, voice="eleven", store={"minutesIdx": 0})
+    app.tts.per_char = 0.02
+    page = app.open()
+    start_session(app)
+    page.wait_for_function("() => { const n = document.querySelector('.sent.now'); return n && Number(n.dataset.k) >= 2; }", timeout=20000)
+    at = page.evaluate("() => Number(document.querySelector('.sent.now').dataset.k)")
+    page.locator("#ask").fill("Подожди, а что это за колонна?")
+    page.locator(".ask button[type=submit]").click()
+    expect(page.locator(".bubble.ai")).to_contain_text("Это тестовый ответ", timeout=6000)
+    app.tts.per_char = 0.002
+    expect(page.locator(".s-end")).to_be_visible(timeout=40000)
+    texts = [c["text"] for c in app.tts.calls]
+    ans = next(i for i, x in enumerate(texts) if x.startswith("Это тестовый ответ"))
+    sents = [x.strip() for x in page.locator(".story").nth(0).locator(".sent").all_inner_texts()]
+    back = next((i for i, x in enumerate(texts) if i > ans and x.startswith(sents[at])), None)
+    assert back is not None, f"после ответа рассказ должен продолжиться с предложения {at} ({sents[at][:30]!r}): {texts[ans:]}"
+    after = " ".join(texts[back:])
+    assert "Последний абзац" in after, after[:120]
+    assert not any(x.startswith(sents[0]) for x in texts[ans:]), "рассказ не должен начинаться заново"
+    assert app.spoken() == [], app.spoken()
     app.verify()
     app.close()
 
