@@ -4,6 +4,11 @@ import { dist, bearing, measure, pointAlong, sampleLine, project } from "../js/g
 import { SentenceBuffer, splitSentences } from "../js/speech.js";
 import { lastJSON, plain } from "../js/util.js";
 import { trimArticle, wikisFor, addPages, finalize, displayName, settleCoords } from "../js/places.js";
+import { nextCut, joinText, marksFor, readWav, wavHeader, pcmToWav, elevenError, geminiError, recover, PROVIDERS } from "../js/tts.js";
+import { better, ROUGH_M, isRough } from "../js/location.js";
+import { parsePlatform } from "../js/platform.js";
+import { geoAdvice } from "../js/geohelp.js";
+import { setLang } from "../js/i18n.js";
 
 let passed = 0;
 const test = (name, fn) => {
@@ -175,6 +180,190 @@ test("JSON достаётся из ответа, даже если вокруг 
 test("разметка и длинные тире убираются из текста", () => {
   assert.equal(plain("**Жирный** текст \u2014 и `код`"), "Жирный текст - и код");
   assert.equal(plain("- Привет, - сказал он."), "- Привет, - сказал он.");
+});
+
+// ---- нейросетевой голос: нарезка текста на отрывки ----
+const sent = (n, len = 80, br = false) => Array.from({ length: n }, (_, i) => ({ text: `${i}`.padEnd(len, "я"), tag: i, br: br && i % 3 === 2 }));
+const EL = PROVIDERS.eleven.plan;
+const GM = PROVIDERS.gemini.plan;
+
+/** Режет готовый текст так же, как это делает "читалка": возвращает длины отрывков в предложениях. */
+function cutAll(items, plan, quick) {
+  const out = [];
+  let from = 0;
+  while (from < items.length) {
+    const to = nextCut(items, from, { index: out.length, ended: true, starving: false, quick, plan });
+    assert.ok(to > from, `отрывок должен продвигаться: ${from} -> ${to}`);
+    out.push(to - from);
+    from = to;
+  }
+  return out;
+}
+
+test("первый отрывок короткий, чтобы рассказ начался сразу", () => {
+  const items = sent(20);
+  assert.equal(nextCut(items, 0, { index: 0, ended: false, starving: true, quick: true, plan: EL }), 1);
+  // Совсем короткое первое предложение ждёт следующего, но не бесконечно.
+  const tiny = [{ text: "Привет!", tag: 0, br: false }];
+  assert.equal(nextCut(tiny, 0, { index: 0, ended: false, starving: true, quick: true, plan: EL }), -1);
+  assert.equal(nextCut(tiny, 0, { index: 0, ended: false, starving: true, quick: true, plan: EL, force: true }), 1);
+  assert.equal(nextCut(tiny, 0, { index: 0, ended: true, starving: true, quick: true, plan: EL }), 1);
+  assert.equal(nextCut([...tiny, ...sent(3)], 0, { index: 0, ended: false, starving: true, quick: true, plan: EL }), 2);
+});
+
+test("пока текст пишется, отрывок ждёт нужной длины, но не даёт звуку кончиться", () => {
+  const items = sent(2); // около 160 знаков
+  assert.equal(nextCut(items, 0, { index: 1, ended: false, starving: false, quick: true, plan: EL }), -1);
+  assert.equal(nextCut(items, 0, { index: 1, ended: false, starving: true, quick: true, plan: EL }), 2);
+  assert.equal(nextCut(sent(1), 0, { index: 1, ended: false, starving: true, quick: true, plan: EL }), -1, "меньше минимума не берём");
+  assert.equal(nextCut(items, 0, { index: 1, ended: true, starving: false, quick: true, plan: EL }), 2, "конец текста забирает остаток");
+  // Текста чуть больше нормы, а звука в запасе хватает: ждём, вдруг рассказ вот-вот кончится.
+  const more = sent(4, 70); // около 280 знаков при норме 240
+  assert.equal(nextCut(more, 0, { index: 1, ended: false, starving: false, quick: true, plan: EL }), -1);
+  assert.equal(nextCut(more, 0, { index: 1, ended: true, starving: false, quick: true, plan: EL }), 4, "кончился: уходит одним запросом");
+  assert.equal(nextCut(more, 0, { index: 1, ended: false, starving: true, quick: true, plan: EL }), 3, "звук кончается: режем по норме");
+  assert.equal(nextCut(sent(6), 0, { index: 1, ended: false, starving: false, quick: true, plan: EL }), 3, "текста уже много: режем по норме");
+});
+
+test("готовый текст делится на ровные отрывки без хвостиков", () => {
+  const story = sent(21); // около 1700 знаков, обычная история
+  const eleven = cutAll(story, EL, false);
+  assert.equal(eleven.reduce((a, b) => a + b, 0), 21);
+  assert.ok(eleven.every((n) => n >= 2), JSON.stringify(eleven));
+  const gemini = cutAll(story, GM, false);
+  assert.deepEqual(gemini.length, 2, JSON.stringify(gemini));
+  assert.ok(Math.abs(gemini[0] - gemini[1]) <= 2, JSON.stringify(gemini));
+  // С коротким началом у Gemini получается три запроса на историю, не больше.
+  assert.ok(cutAll(story, GM, true).length <= 3);
+  // Короткий текст (вопрос, ответ) уходит одним запросом.
+  assert.deepEqual(cutAll(sent(3), GM, false), [3]);
+});
+
+test("отрывок старается закончиться на границе абзаца", () => {
+  const items = sent(12, 80, true); // абзацы по три предложения
+  const to = nextCut(items, 0, { index: 0, ended: false, starving: false, quick: false, plan: EL });
+  assert.equal(to, 3);
+  assert.equal(joinText(items, 0, 4).split("\n\n").length, 2);
+});
+
+test("очень длинное предложение не зацикливает нарезку", () => {
+  const items = [{ text: "я".repeat(5000), tag: 0, br: false }, ...sent(3)];
+  assert.deepEqual(cutAll(items, EL, false)[0], 1);
+});
+
+test("метки предложений внутри отрывка идут по порядку от нуля", () => {
+  const items = sent(4);
+  const m = marksFor(items, 1, 4);
+  assert.deepEqual(m.map((x) => x.tag), [1, 2, 3]);
+  assert.equal(m[0].at, 0);
+  assert.ok(m[1].at > 0.3 && m[1].at < 0.36 && m[2].at > m[1].at && m[2].at < 1);
+});
+
+// ---- нейросетевой голос: звук и ошибки ----
+test("сырой звук от Gemini заворачивается в WAV с верной длительностью", () => {
+  const pcm = new Uint8Array(48000); // секунда: 24 кГц, 16 бит, моно
+  const raw = pcmToWav([pcm], "audio/L16;codec=pcm;rate=24000");
+  assert.equal(raw.dur, 1);
+  const file = new Uint8Array(44 + pcm.length);
+  file.set(wavHeader(pcm.length, 24000, 1));
+  const w = readWav(file);
+  assert.deepEqual([w.rate, w.channels, w.bits, w.offset, w.length], [24000, 1, 16, 44, 48000]);
+  // Готовый WAV (так отвечает обычный запрос) и два куска подряд.
+  assert.equal(pcmToWav([file], "audio/wav").dur, 1);
+  assert.equal(pcmToWav([file, file], "audio/wav").dur, 2);
+  // Заголовок с незаполненной длиной: звук идёт до конца файла.
+  const open = file.slice();
+  new DataView(open.buffer).setUint32(40, 0, true);
+  assert.equal(readWav(open).length, 48000);
+  assert.equal(readWav(new Uint8Array(100)), null);
+});
+
+test("ответы сервисов об ошибках разбираются по смыслу", () => {
+  const e = (status, detail) => elevenError(status, { detail }).kind;
+  assert.equal(e(401, { type: "authentication_error", code: "unauthorized", message: "Invalid API key", status: "invalid_api_key" }), "auth");
+  assert.equal(e(401, { status: "missing_permissions", message: "The API key you used is missing the permission text_to_speech" }), "permission");
+  assert.equal(e(401, { status: "quota_exceeded", message: "This request exceeds your quota." }), "credit");
+  assert.equal(e(402, { status: "payment_required", message: "Free users cannot use library voices via the API." }), "voice");
+  assert.equal(e(404, { status: "voice_not_found", message: "A voice with that id was not found." }), "voice");
+  assert.equal(e(400, { status: "model_not_found", message: "Model eleven_v4 was not found" }), "model");
+  assert.equal(e(429, { status: "too_many_concurrent_requests", message: "Too many concurrent requests" }), "rate");
+  assert.equal(elevenError(422, { detail: [{ loc: ["body", "previous_text"], msg: "extra fields not permitted", type: "value_error" }] }).kind, "request");
+  assert.equal(elevenError(503, null, "upstream").kind, "server");
+
+  const g = (status, error) => geminiError(status, { error });
+  assert.equal(g(400, { code: 400, message: "API key not valid. Please pass a valid API key.", status: "INVALID_ARGUMENT", details: [{ reason: "API_KEY_INVALID" }] }).kind, "auth");
+  assert.equal(g(404, { message: "models/gemini-9 is not found for API version v1beta", status: "NOT_FOUND" }).kind, "model");
+  assert.equal(g(400, { message: "Invalid JSON payload received. Unknown name \"speech_metadata\"", status: "INVALID_ARGUMENT" }).kind, "request");
+  const day = g(429, { message: "Quota exceeded", status: "RESOURCE_EXHAUSTED", details: [{ violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel", quotaMetric: "generate_requests_per_model_per_day" }] }] });
+  assert.equal(day.kind, "daily");
+  const minute = g(429, { message: "Quota exceeded", status: "RESOURCE_EXHAUSTED", details: [{ violations: [{ quotaId: "GenerateRequestsPerMinutePerProjectPerModel" }] }, { retryDelay: "17s" }] });
+  assert.deepEqual([minute.kind, minute.retryAfter], ["rate", 17000]);
+  assert.equal(g(400, { message: "User location is not supported for the API use.", status: "FAILED_PRECONDITION" }).kind, "permission");
+});
+
+test("после ошибки выбирается разумное продолжение", () => {
+  const p = PROVIDERS.gemini;
+  const rt = { model: 0, minimal: false, plainVoice: false };
+  assert.equal(recover(p, rt, { kind: "auth" }, 1), -1);
+  assert.equal(recover(p, rt, { kind: "request" }, 1), 0);
+  assert.equal(rt.minimal, true, "сначала убираем необязательное");
+  assert.equal(recover(p, rt, { kind: "daily" }, 2), 0);
+  assert.equal(rt.model, 1, "суточный лимит: переходим на соседнюю модель");
+  assert.equal(recover(p, rt, { kind: "daily" }, 3), -1, "моделей больше нет");
+  assert.equal(recover(p, rt, { kind: "rate", retryAfter: 4000 }, 1), 4000);
+  assert.equal(recover(p, rt, { kind: "rate", retryAfter: 60000 }, 1), -1, "минуту ждать не будем");
+  assert.equal(recover(p, rt, { kind: "server" }, 1), 700);
+  assert.equal(recover(p, rt, { kind: "server" }, 3), -1);
+  // Два запроса ушли одновременно и оба получили отказ: настройки переключаются один раз, а не дважды.
+  const shared = { model: 0, minimal: false, plainVoice: false };
+  const sentWith = { ...shared };
+  assert.equal(recover(p, shared, { kind: "request" }, 1, sentWith), 0);
+  assert.equal(recover(p, shared, { kind: "request" }, 1, sentWith), 0);
+  assert.deepEqual(shared, { model: 0, minimal: true, plainVoice: false });
+  const afterMin = { ...shared };
+  assert.equal(recover(p, shared, { kind: "daily" }, 2, afterMin), 0);
+  assert.equal(recover(p, shared, { kind: "daily" }, 2, afterMin), 0);
+  assert.equal(shared.model, 1);
+});
+
+// ---- геолокация ----
+test("свежий точный замер не затирается грубым, а устаревший заменяется", () => {
+  const now = 1_000_000;
+  const fine = { lat: 1, lon: 1, acc: 12, ts: now - 2000 };
+  assert.equal(better(null, { acc: 5000 }, now), true);
+  assert.equal(better(fine, { acc: 800 }, now), false);
+  assert.equal(better(fine, { acc: 15 }, now), true);
+  assert.equal(better({ ...fine, ts: now - 30000 }, { acc: 800 }, now), true);
+  assert.equal(isRough({ acc: ROUGH_M + 1 }), true);
+  assert.equal(isRough({ acc: 300 }), false);
+});
+
+test("телефон и браузер узнаются по строке браузера", () => {
+  const ios = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)";
+  assert.deepEqual(parsePlatform(`${ios} Version/18.1 Mobile/15E148 Safari/604.1`), { os: "ios", browser: "safari", standalone: false });
+  assert.equal(parsePlatform(`${ios} CriOS/131.0 Mobile/15E148 Safari/604.1`).browser, "chrome");
+  assert.equal(parsePlatform(`${ios} Mobile/15E148`).browser, "inapp", "встроенный браузер другого приложения");
+  assert.equal(parsePlatform(`${ios} Mobile/15E148`, { standalone: true }).browser, "safari", "значок на экране Домой");
+  assert.equal(parsePlatform("Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36").browser, "chrome");
+  assert.equal(parsePlatform("Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36").browser, "inapp");
+});
+
+test("подсказка про геолокацию зависит от телефона и причины", () => {
+  setLang("ru");
+  const info = (status) => ({ status, slow: false, perm: "prompt", error: null });
+  const safari = { os: "ios", browser: "safari", standalone: false };
+  const denied = geoAdvice(info("denied"), safari);
+  assert.equal(denied.steps.length, 4);
+  assert.ok(denied.steps[1].includes("Сайты Safari") && denied.steps[2].includes("Настройки веб-сайта"));
+  const chromeIos = geoAdvice(info("denied"), { os: "ios", browser: "chrome", standalone: false });
+  assert.ok(chromeIos.steps[1].includes("«Chrome»") && chromeIos.steps.length === 3);
+  const android = geoAdvice(info("denied"), { os: "android", browser: "chrome", standalone: false });
+  assert.ok(android.steps[0].includes("Геоданные") && android.steps[1].includes("«Chrome»"));
+  const inapp = geoAdvice(info("denied"), { os: "ios", browser: "inapp", standalone: false });
+  assert.ok(inapp.inApp && inapp.steps[0].includes("Открыть в Safari"));
+  const rough = geoAdvice(info("ok"), safari, { rough: true, acc: 4200 });
+  assert.ok(rough.lead.includes("4,2 км") && rough.steps[0].includes("Точная геопозиция"));
+  assert.equal(geoAdvice(info("timeout"), safari).steps.length, 3);
 });
 
 console.log(`\n${passed} проверок пройдено`);

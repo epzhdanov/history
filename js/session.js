@@ -61,7 +61,8 @@ class Session {
     });
     this.onVisibility = () => {
       if (document.hidden) {
-        if (speaker.active && speaker.state !== "paused") speaker.pause();
+        // Голос телефона с погашенным экраном молчит, поэтому встаём на паузу. Нейросетевой звучит и так.
+        if (speaker.active && speaker.state !== "paused" && !speaker.background) speaker.pause();
       } else this.lockScreen();
     };
     document.addEventListener("visibilitychange", this.onVisibility);
@@ -166,8 +167,34 @@ class Session {
     b.hidden = !speaker.supported;
   }
 
+  /** Общие настройки для любого чтения вслух. */
+  voiceOpts(extra) {
+    return { lang: this.ui, rate: this.rate, kids: this.kids, ...extra };
+  }
+
+  /** Кнопки на экране блокировки и в наушниках: пауза, продолжить, следующая история. */
+  mediaControls(s) {
+    const ms = typeof navigator !== "undefined" ? navigator.mediaSession : null;
+    if (!ms) return;
+    try {
+      if (!s) {
+        ms.metadata = null;
+        for (const a of ["play", "pause", "nexttrack"]) ms.setActionHandler(a, null);
+        return;
+      }
+      if (typeof MediaMetadata !== "undefined") {
+        ms.metadata = new MediaMetadata({ title: s.title, artist: s.place.name, album: t("app.title"), artwork: [{ src: "icons/icon-512.png", sizes: "512x512", type: "image/png" }] });
+      }
+      ms.setActionHandler("play", () => (speaker.state === "paused" ? speaker.resume() : this.togglePlay()));
+      ms.setActionHandler("pause", () => speaker.pause());
+      ms.setActionHandler("nexttrack", () => this.skip());
+    } catch {
+      /* не везде есть, обойдёмся */
+    }
+  }
+
   async lockScreen() {
-    // Не даём экрану погаснуть: с погасшим экраном телефон обрывает речь.
+    // Не даём экрану погаснуть: с погасшим экраном голос телефона обрывается.
     try {
       if (this.dead || !("wakeLock" in navigator) || document.hidden) return;
       this.wake = await navigator.wakeLock.request("screen");
@@ -219,7 +246,14 @@ class Session {
       }
       this.addStories(plan);
       this.setStatus(null);
-      if (this.voiceOn) await speaker.whenIdle();
+      // Даём договорить вступительную фразу, но не ждём её вечно, если сервис голоса тормозит.
+      if (this.voiceOn) {
+        const patience = (async () => {
+          await sleep(5000);
+          while (speaker.state === "speaking" && !this.dead) await sleep(200);
+        })();
+        await Promise.race([speaker.whenIdle(), patience]);
+      }
       if (this.dead) return;
       this.muteHint();
       this.present(0);
@@ -232,7 +266,7 @@ class Session {
 
   /** На iPhone синтезатор молчит в беззвучном режиме: один раз подсказываем. */
   muteHint() {
-    if (!this.voiceOn || store.get("muteHintShown", false)) return;
+    if (!this.voiceOn || speaker.cloudOn || store.get("muteHintShown", false)) return;
     if (!/iPhone|iPad|iPod/.test(navigator.userAgent)) return;
     store.set("muteHintShown", true);
     toast(t("s.muteHint"), 6000);
@@ -300,8 +334,9 @@ class Session {
         s.quizPromise = makeQuiz({ ui: this.ui, audience: this.cfg.audience, voice: this.voiceOn, kind: this.quizKind(s.idx), title: s.title, text: s.text }, signal).catch(() => null);
       }
       notify();
-      // Следующую историю пишем заранее, пока звучит эта.
+      // Следующую историю пишем заранее, пока звучит эта, и заранее готовим её начало для голоса.
       if (!this.dead && s.idx === this.cursor) this.generate(this.stories[s.idx + 1]);
+      if (!this.dead && this.voiceOn && s.idx === this.cursor + 1) speaker.prepare(s.sentences, this.voiceOpts());
     })().catch((e) => {
       s.status = "error";
       s.error = e;
@@ -466,6 +501,7 @@ class Session {
     this.renderStory(s);
     this.updCounter();
     this.updMap(false);
+    this.mediaControls(s);
     this.scrollTo(s.el.root, "start");
     this.generate(s);
     if (s.status === "done") this.generate(this.stories[i + 1]);
@@ -488,11 +524,11 @@ class Session {
     this.narrating = s;
     let reading = null;
     let k = from;
-    if (useVoice) reading = speaker.open({ lang: this.ui, rate: this.rate, onChunk: (tag) => this.highlight(s, tag) });
+    if (useVoice) reading = speaker.open(this.voiceOpts({ onChunk: (tag) => this.highlight(s, tag) }));
     const push = () => {
       if (!reading) return;
       while (k < s.sentences.length) {
-        reading.add(s.sentences[k].text, k);
+        reading.add(s.sentences[k].text, k, s.sentences[k].br);
         k++;
       }
       if (s.status === "done" || s.status === "error") reading.end();
@@ -588,7 +624,7 @@ class Session {
     }
     box.append(h("button", { type: "button", class: "link-btn", onclick: () => this.skipQuiz(s) }, t("q.skip")));
     this.scrollTo(box, "center");
-    if (this.voiceOn) speaker.say(spoken, { lang: this.ui, rate: this.rate });
+    if (this.voiceOn) speaker.say(spoken, this.voiceOpts());
   }
 
   endWaiting() {
@@ -647,7 +683,7 @@ class Session {
     box.append(h("p", { class: `quiz-reply ${verdict}` }, reply));
     this.scrollTo(box, "center");
     if (my !== this.turn) return;
-    if (this.voiceOn && reply) await speaker.say(reply, { lang: this.ui, rate: this.rate });
+    if (this.voiceOn && reply) await speaker.say(reply, this.voiceOpts());
     if (my !== this.turn || this.dead) return;
     if (s.idx === this.cursor) this.proceed(s, my);
   }
@@ -715,7 +751,7 @@ class Session {
     this.scrollTo(bubble, "center");
     this.chat.push({ role: "user", content: text });
 
-    const reading = this.voiceOn ? speaker.open({ lang: this.ui, rate: this.rate }) : null;
+    const reading = this.voiceOn ? speaker.open(this.voiceOpts()) : null;
     let started = false;
     let para = null;
     const buf = new SentenceBuffer((sent, br) => {
@@ -731,7 +767,7 @@ class Session {
       }
       para.append(`${clean} `);
       if (br) para = null;
-      reading?.add(clean, null);
+      reading?.add(clean, null, br);
     });
     try {
       const storyText = cur ? cur.text || cur.sentences.map((x) => x.text).join(" ") : "";
@@ -778,10 +814,10 @@ class Session {
       h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn primary", onclick: () => this.more() }, icon("sparkle", 18), t("s.moreStories")), h("button", { type: "button", class: "btn", onclick: () => this.exit() }, t("s.home")))
     );
     this.el.feed.append(this.el.end);
-    if (this.voiceOn) {
+    if (this.voiceOn && !speaker.frugal) {
       await sleep(500);
       if (my !== this.turn || this.dead) return;
-      speaker.say(`${t("s.endTitle")}.`, { lang: this.ui, rate: this.rate });
+      speaker.say(`${t("s.endTitle")}.`, this.voiceOpts());
     }
   }
 
@@ -838,6 +874,7 @@ class Session {
     speaker.onState = null;
     speaker.onBroken = null;
     listener.cancel();
+    this.mediaControls(null);
     this.offLocation?.();
     document.removeEventListener("visibilitychange", this.onVisibility);
     try {

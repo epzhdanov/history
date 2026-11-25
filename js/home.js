@@ -3,7 +3,8 @@
 import { h, icon, store, debounce, toast, clear } from "./util.js";
 import { t, getLang, setLang, fmtDist } from "./i18n.js";
 import { MapView } from "./mapview.js";
-import { startLocation, onLocation, lastKnown } from "./location.js";
+import { startLocation, retryLocation, onLocation, lastKnown, isRough } from "./location.js";
+import { openGeoHelp } from "./geohelp.js";
 import { loadNearby, enrich, loadMinors, reverseGeocode, searchPlaces, describe, wikisFor } from "./places.js";
 import { fetchRoute, loadAlongRoute, loadMinorsAlongRoute, walkMinutes } from "./route.js";
 import { hasKey, suggestTopics, errorText, isAborted } from "./ai.js";
@@ -50,6 +51,7 @@ export function mountHome(root, { onGenerate }) {
     minutesIdx: store.get("minutesIdx", 3),
     gps: null,
     gpsStatus: "idle",
+    gpsSlow: false,
     manual: null,
     area: null,
     wikis: ["en"],
@@ -60,13 +62,19 @@ export function mountHome(root, { onGenerate }) {
     picking: false,
     results: null,
     searching: false,
+    whereResults: null,
+    whereSearching: false,
     active: true,
   };
   const data = { nearby: newData(), route: newData() };
-  const ac = { nearby: null, route: null, topics: null, search: null };
+  const ac = { nearby: null, route: null, topics: null, search: null, where: null };
   const el = {};
 
-  const center = () => S.manual || S.gps;
+  // Примерная геопозиция (точность в километрах) для поиска "что рядом" не годится.
+  const usable = () => (S.gps && !isRough(S.gps) ? S.gps : null);
+  const center = () => S.manual || usable();
+  // Место не определилось: человеку нужно дать указать его самому.
+  const stuck = () => !center() && (S.gpsSlow || !["idle", "asking"].includes(S.gpsStatus));
   const radius = () => RADII[S.radiusIdx];
   const corridor = () => CORRIDORS[S.corridorIdx];
 
@@ -85,12 +93,16 @@ export function mountHome(root, { onGenerate }) {
   const map = new MapView(mapEl, { ...(start ? { center: start, zoom: 15 } : {}), pad: { top: 66, bottom: 44, side: 14 } });
 
   map.onClick((p) => {
+    if (stuck()) return setManual(p);
     if (S.tab === "route") return setDest({ ...p, name: "" });
     if (S.picking) setManual(p);
   });
   map.onHold((p) => {
-    if (S.tab === "route") setDest({ ...p, name: "" });
-    else setManual(p);
+    if (S.tab === "route" && center()) return setDest({ ...p, name: "" });
+    // Долгое нажатие легко сделать случайно, поэтому говорим вслух, что точка теперь выбрана вручную.
+    const hadGps = !!usable();
+    setManual(p);
+    if (hadGps) toast(t("home.manualSet"), 5000);
   });
 
   // ---------- Мелкие строительные блоки ----------
@@ -156,10 +168,9 @@ export function mountHome(root, { onGenerate }) {
           class: "icon-btn",
           "aria-label": t("home.locate"),
           onclick: () => {
-            if (S.manual) clearManual();
-            else if (S.gps) {
-              updMap(true);
-            }
+            if (S.manual) return clearManual();
+            if (S.gpsStatus === "denied") return openHelp();
+            if (usable()) updMap(true);
             startLocation();
           },
         },
@@ -169,27 +180,59 @@ export function mountHome(root, { onGenerate }) {
     );
   }
 
+  function updPicking() {
+    const self = stuck();
+    el.pickBtn?.setAttribute("aria-pressed", String(S.picking));
+    map.setPicking(S.picking || self || S.tab === "route");
+    pickBanner.hidden = !(S.picking || self);
+    pickBanner.textContent = self ? t("home.pickSelf") : S.picking ? t("home.pickHint") : "";
+  }
+
   function setPicking(on) {
     S.picking = on && S.tab === "nearby";
-    el.pickBtn?.setAttribute("aria-pressed", String(S.picking));
-    map.setPicking(S.picking || S.tab === "route");
-    pickBanner.hidden = !S.picking;
-    pickBanner.textContent = S.picking ? t("home.pickHint") : "";
+    updPicking();
+  }
+
+  function openHelp() {
+    openGeoHelp({ onPick: pickManually });
+  }
+
+  /** Человек хочет указать место сам: если места ещё нет, ведём к поиску по названию, иначе включаем выбор на карте. */
+  function pickManually() {
+    if (center()) return setPicking(true);
+    updWhere();
+    const input = el.whereBox?.querySelector("input");
+    el.whereBox?.scrollIntoView({ block: "center", behavior: "smooth" });
+    input?.focus({ preventScroll: true });
   }
 
   // ---------- Табличка "где я" ----------
+  function plaqueActions(...buttons) {
+    return h(
+      "div",
+      { class: "plaque-actions" },
+      buttons.filter(Boolean).map(([label, fn, alt]) => h("button", { type: "button", class: alt ? "plaque-btn alt" : "plaque-btn", onclick: fn }, label))
+    );
+  }
+
   function updPlaque() {
     clear(plaque);
     plaque.classList.remove("warn");
     const c = center();
     if (!c) {
-      const msg = { denied: "home.geoDenied", failed: "home.geoFailed", insecure: "home.geoInsecure", unsupported: "home.geoFailed" }[S.gpsStatus];
-      if (msg) {
-        plaque.classList.add("warn");
-        plaque.append(h("span", { class: "plaque-text" }, t(msg)));
-      } else {
-        plaque.append(h("span", { class: "plaque-text" }, h("span", { class: "dots" }, t("home.locating"))));
-      }
+      const st = S.gpsStatus;
+      const say = (text, warn, ...buttons) => {
+        plaque.classList.toggle("warn", warn);
+        plaque.append(h("span", { class: "plaque-text" }, text), plaqueActions(...buttons));
+      };
+      const pick = [t("home.geoPick"), pickManually, true];
+      if (S.gps && isRough(S.gps)) say(t("home.geoRough", { dist: fmtDist(S.gps.acc) }), true, [t("home.geoFix"), openHelp], pick);
+      else if (st === "denied") say(t("home.geoDenied"), true, [t("home.geoHow"), openHelp], pick);
+      else if (st === "unavailable" || st === "timeout") say(t("home.geoFailed"), true, [t("home.geoAgain"), () => retryLocation()], pick, [t("home.geoWhat"), openHelp, true]);
+      else if (st === "insecure") say(t("home.geoInsecure"), true, pick);
+      else if (st === "unsupported") say(t("home.geoUnsupported"), true, pick);
+      else if (S.gpsSlow) say(t("home.geoSlow"), false, [t("home.geoWhat"), openHelp], pick);
+      else plaque.append(h("span", { class: "plaque-text" }, h("span", { class: "dots" }, t("home.locating"))));
       return;
     }
     const name = S.area?.road || S.area?.quarter || S.area?.city || t("home.unknownPlace");
@@ -201,6 +244,67 @@ export function mountHome(root, { onGenerate }) {
     } else if (S.gps?.acc > 60) {
       plaque.append(h("span", { class: "plaque-sub" }, t("home.accuracy", { m: Math.round(S.gps.acc / 10) * 10 })));
     }
+  }
+
+  // ---------- "Где вы сейчас": поиск места по названию, когда телефон его не определил ----------
+  function updWhere() {
+    const box = el.whereBox;
+    if (!box) return;
+    const show = stuck();
+    box.hidden = !show;
+    updPicking();
+    if (!show) {
+      if (box.firstChild) clear(box);
+      S.whereResults = null;
+      return;
+    }
+    // Поле ввода не пересоздаём, пока человек в нём печатает.
+    let form = box.querySelector("form");
+    if (!form) {
+      const input = h("input", { type: "search", id: "where-q", placeholder: t("where.placeholder"), autocomplete: "off", enterkeyhint: "search", "aria-label": t("where.placeholder") });
+      form = h(
+        "form",
+        {
+          class: "search",
+          onsubmit: (e) => {
+            e.preventDefault();
+            searchWhere(input.value.trim());
+            input.blur();
+          },
+        },
+        input,
+        h("button", { type: "submit", class: "icon-btn solid", "aria-label": t("route.search") }, icon("search", 20))
+      );
+      box.append(h("h2", { class: "where-title" }, t("where.label")), form, h("div", { class: "where-out" }));
+    }
+    const out = box.querySelector(".where-out");
+    clear(out);
+    if (S.whereSearching) out.append(h("p", { class: "hint dots" }, t("where.searching")));
+    else if (S.whereResults && !S.whereResults.length) out.append(h("p", { class: "hint" }, t("route.notFound")));
+    else if (S.whereResults?.length) {
+      const list = h("ul", { class: "results" });
+      for (const r of S.whereResults) {
+        list.append(h("li", null, h("button", { type: "button", onclick: () => setManual({ lat: r.lat, lon: r.lon }) }, h("strong", null, r.name), h("span", null, r.detail))));
+      }
+      out.append(list);
+    } else out.append(h("p", { class: "hint" }, t("where.hint")));
+  }
+
+  async function searchWhere(q) {
+    if (!q) return;
+    ac.where?.abort();
+    const ctl = (ac.where = new AbortController());
+    S.whereSearching = true;
+    S.whereResults = null;
+    updWhere();
+    try {
+      S.whereResults = (await searchPlaces(q, S.gps || lastKnown(), S.ui, ctl.signal)).slice(0, 5);
+    } catch {
+      if (ctl.signal.aborted) return;
+      S.whereResults = [];
+    }
+    S.whereSearching = false;
+    updWhere();
   }
 
   // ---------- Панель ----------
@@ -216,6 +320,7 @@ export function mountHome(root, { onGenerate }) {
       t("tab.nearby"),
       "tabs"
     );
+    el.whereBox = h("div", { class: "where-box", hidden: true });
     el.routeBox = h("div", { class: "route-box" });
     el.aud = seg(
       [
@@ -275,7 +380,8 @@ export function mountHome(root, { onGenerate }) {
       onChange: (i) => store.set("minutesIdx", i),
     });
     el.topics = h("div", { class: "topics" });
-    panel.append(el.tabs.el, el.routeBox, h("div", { class: "duo" }, el.aud.el, el.mode.el), h("div", { class: "duo" }, el.radius.el, el.corridor.el, el.minutes.el), el.topics);
+    panel.append(el.whereBox, el.tabs.el, el.routeBox, h("div", { class: "duo" }, el.aud.el, el.mode.el), h("div", { class: "duo" }, el.radius.el, el.corridor.el, el.minutes.el), el.topics);
+    updWhere();
     updTabParts();
     updRouteBox();
     updTopics();
@@ -504,7 +610,7 @@ export function mountHome(root, { onGenerate }) {
     ac.nearby?.abort();
     ac.topics?.abort();
     const ctl = (ac.nearby = new AbortController());
-    Object.assign(d, newData(), { key, center: { lat: c.lat, lon: c.lon }, state: "loading" });
+    Object.assign(d, newData(), { key, center: { lat: c.lat, lon: c.lon, acc: S.manual ? 0 : c.acc || 0 }, state: "loading" });
     updTopics();
     updCTA();
     updMap(false);
@@ -521,6 +627,8 @@ export function mountHome(root, { onGenerate }) {
       updMap(false);
       updTopics();
       updCTA();
+      // Пока грузились места, телефон мог уточнить положение: тогда ищем заново, не тратя запрос на темы.
+      if (recentre()) return;
       if (!d.cands.length) return;
 
       // Мелкие объекты догружаются сами по себе и не задерживают темы.
@@ -665,7 +773,6 @@ export function mountHome(root, { onGenerate }) {
   function setTab(tab) {
     S.tab = tab;
     setPicking(false);
-    map.setPicking(tab === "route");
     updTabParts();
     updRouteBox();
     updTopics();
@@ -707,9 +814,11 @@ export function mountHome(root, { onGenerate }) {
 
   function setManual(p) {
     S.manual = { lat: p.lat, lon: p.lon };
+    S.whereResults = null;
     setPicking(false);
     S.area = null;
     updPlaque();
+    updWhere();
     updMap(true);
     refresh(true);
   }
@@ -718,11 +827,13 @@ export function mountHome(root, { onGenerate }) {
     S.manual = null;
     S.area = null;
     updPlaque();
-    if (S.gps) {
+    updWhere();
+    if (usable()) {
       updMap(true);
       refresh(true);
     } else {
       map.clearArea();
+      updTopics();
       startLocation();
     }
   }
@@ -739,15 +850,20 @@ export function mountHome(root, { onGenerate }) {
   function generate() {
     const tab = S.tab;
     const d = data[tab];
-    if (!center()) return toast(t("cta.needLocation"));
+    if (!center()) {
+      toast(t("cta.needLocation"));
+      return pickManually();
+    }
     if (tab === "route" && !S.route) return toast(t("route.needDest"));
     if (!hasKey()) return openSettings({ focusKey: true, onClose: afterSettings });
     if (d.state === "loading") return;
     if (d.state === "error" || d.state === "idle") return refresh(true);
     if (!d.cands.length) return toast(t(tab === "route" ? "places.noneRoute" : "places.none"));
     if (S.voice && speaker.supported) {
-      // Говорим сразу, в обработчике нажатия: это и отклик, и разрешение на звук для iPhone.
-      speaker.say(t(S.audience === "kids" ? "say.startKids" : "say.start"), { lang: S.ui, rate: prefs.rate });
+      // Звук включаем сразу, в обработчике нажатия: позже, после ответа сети, телефон уже не разрешит.
+      // Заодно говорим короткую фразу как отклик (кроме сервисов, где на счету каждый запрос).
+      if (speaker.frugal) speaker.unlock();
+      else speaker.say(t(S.audience === "kids" ? "say.startKids" : "say.start"), { lang: S.ui, rate: prefs.rate, kids: S.audience === "kids" });
     }
     onGenerate({
       ...buildCtx(tab),
@@ -758,33 +874,83 @@ export function mountHome(root, { onGenerate }) {
   }
 
   // ---------- Геолокация ----------
-  onLocation(({ pos, status }) => {
+  let settle = null; // короткое ожидание более точного замера перед первой загрузкой мест
+
+  /**
+   * Места загружены вокруг прежнего или грубого замера, а человек на самом деле в другой точке:
+   * тогда ищем заново. Возвращает true, если новый поиск назначен.
+   */
+  function recentre() {
+    if (!S.active || S.manual) return false;
+    const pos = usable();
+    const d = data[S.tab];
+    // Пока человек выбирает темы или пишет свой интерес, список под рукой не меняем.
+    if (!pos || d.selected.size || S.interest.trim() || d.state === "loading") return false;
+    if (S.tab === "nearby") {
+      if (!d.center) return false;
+      const moved = dist(d.center, pos);
+      const walked = moved > Math.max(60, radius() * 0.4) && pos.acc < 120;
+      const sharper = (d.center.acc || 0) > 150 && pos.acc < d.center.acc * 0.5 && moved > Math.max(40, pos.acc);
+      if (!walked && !sharper) return false;
+      map.setArea(pos, radius(), { fit: false });
+      scheduleRefresh();
+      return true;
+    }
+    if (S.route?.from && dist(S.route.from, pos) > 120 && pos.acc < 120) {
+      scheduleRefresh();
+      return true;
+    }
+    return false;
+  }
+
+  onLocation(({ pos, status, slow }) => {
+    const had = !!center();
     S.gpsStatus = status;
-    const first = !S.gps && !!pos;
+    S.gpsSlow = slow;
     if (pos) S.gps = pos;
     map.setYou(S.gps, S.gps?.acc);
-    if (!pos || S.manual) return updPlaque();
-    if (first) {
+    if (S.manual) return updPlaque();
+    const c = center();
+    if (!c) {
+      // Места нет или оно слишком грубое: говорим, что случилось, и даём указать место самому.
+      if (S.gps && !S.roughShown) {
+        S.roughShown = true;
+        map.showCircle(S.gps, S.gps.acc);
+      }
       updPlaque();
+      updWhere();
+      updTopics();
+      return;
+    }
+    if (!had) {
+      updPlaque();
+      updWhere();
+      updMap(true);
+      clearTimeout(settle);
+      settle = null;
+      // Первый замер бывает грубым (по сети). Даём телефону пару секунд на уточнение, чтобы не искать места дважды.
+      if (c.acc <= 150) return refresh(false);
+      settle = setTimeout(() => {
+        settle = null;
+        refresh(false);
+      }, 2500);
+      return;
+    }
+    if (settle) {
+      if (c.acc > 150) return;
+      clearTimeout(settle);
+      settle = null;
       updMap(true);
       return refresh(false);
     }
-    if (!S.active) return;
-    // Пока человек выбирает темы или пишет свой интерес, список под рукой не меняем.
-    const d = data[S.tab];
-    if (d.selected.size || S.interest.trim() || d.state === "loading") return;
-    if (S.tab === "nearby") {
-      const moved = d.center ? dist(d.center, pos) : Infinity;
-      if (moved > Math.max(60, radius() * 0.4) && pos.acc < 120) {
-        map.setArea(pos, radius(), { fit: false });
-        scheduleRefresh();
-      }
-    } else if (S.route?.from && dist(S.route.from, pos) > 120 && pos.acc < 120) {
-      scheduleRefresh();
-    }
+    recentre();
   });
 
   // ---------- Запуск ----------
+  // Высота таблички нужна стилям: над ней должны оставаться подпись карты и кнопки.
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => view.style.setProperty("--plaque-h", `${plaque.offsetHeight}px`)).observe(plaque);
+  }
   document.body.dataset.aud = S.audience;
   buildTop();
   buildPanel();

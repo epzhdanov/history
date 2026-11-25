@@ -1,7 +1,10 @@
-// Голос: чтение вслух (speechSynthesis) и распознавание речи (SpeechRecognition).
-// Оба механизма встроены в браузер телефона и не требуют отдельного сервиса.
+// Голос: чтение вслух и распознавание речи.
+// Читают два "чтеца": нейросетевой голос (tts.js, нужен ключ сервиса) и запасной,
+// встроенный в телефон (speechSynthesis). Распознавание речи (SpeechRecognition) тоже встроенное.
 
-import { store } from "./util.js";
+import { store, toast } from "./util.js";
+import { t } from "./i18n.js";
+import { CloudSpeaker, ttsProvider, ttsErrorText } from "./tts.js";
 
 // ---------- Деление текста на предложения ----------
 
@@ -176,10 +179,10 @@ class Reading {
 }
 
 /**
- * Одна "читалка" на всё приложение. В каждый момент звучит одно чтение (Reading),
+ * Чтение голосом телефона. В каждый момент звучит одно чтение (Reading),
  * в которое можно добавлять предложения по мере того, как их пишет Claude.
  */
-export class Speaker {
+export class SystemSpeaker {
   constructor() {
     this.supported = !!synth && typeof SpeechSynthesisUtterance !== "undefined";
     this.cur = null;
@@ -495,5 +498,181 @@ export class Listener {
   }
 }
 
-export const speaker = new Speaker();
+// ---------- Один голос на всё приложение ----------
+
+// Сколько не трогать сервис после отказа, чтобы не спотыкаться на каждой фразе.
+const COOL_MS = { auth: 600000, permission: 600000, credit: 600000, daily: 1800000, rate: 60000 };
+
+/**
+ * Выбирает, кто читает: нейросетевой голос, если он настроен, иначе голос телефона.
+ * Если сервис отказал посреди рассказа, остаток дочитывает голос телефона.
+ * Снаружи это та же "читалка": open/say/stop/pause/resume/whenIdle и состояния
+ * idle | speaking | waiting | paused.
+ */
+class Voice {
+  constructor() {
+    this.sys = new SystemSpeaker();
+    this.cloud = new CloudSpeaker();
+    this.eng = this.sys;
+    this.onState = null;
+    this.onBroken = null;
+    this.gen = 0;
+    this.coolUntil = 0;
+    this.curDone = null;
+    const relay = (eng) => (state) => {
+      if (this.eng === eng) this.onState?.(state);
+    };
+    this.sys.onState = relay(this.sys);
+    this.cloud.onState = relay(this.cloud);
+    this.sys.onBroken = () => this.onBroken?.();
+    this.cloud.onBlocked = () => toast(t("s.tapToPlay"), 5000);
+  }
+
+  /** Нейросетевой голос настроен и сейчас не "отдыхает" после отказа. */
+  get cloudOn() {
+    return this.cloud.ready && Date.now() >= this.coolUntil;
+  }
+
+  get supported() {
+    return this.sys.supported || this.cloud.ready;
+  }
+
+  get state() {
+    return this.eng.state;
+  }
+
+  get active() {
+    return this.eng.active;
+  }
+
+  /** Нынешний голос умеет звучать с погашенным экраном. */
+  get background() {
+    return this.eng === this.cloud;
+  }
+
+  /** У сервиса счёт на запросы: служебные фразы вслух не произносим. */
+  get frugal() {
+    return this.cloudOn && !!ttsProvider()?.frugal;
+  }
+
+  /** Настройки голоса поменялись: пробуем сервис заново. */
+  reset() {
+    this.coolUntil = 0;
+  }
+
+  /** Вызывается из обработчика нажатия: без этого телефон не даст заговорить позже, после ответа сети. */
+  unlock() {
+    if (this.cloudOn) this.cloud.unlock();
+    this.sys.unlock();
+  }
+
+  use(eng) {
+    if (this.eng === eng) return;
+    this.eng.stop();
+    this.eng = eng;
+  }
+
+  track(stream) {
+    const done = stream.done;
+    this.curDone = done;
+    done.then(() => {
+      if (this.curDone === done) this.curDone = null;
+    });
+    return stream;
+  }
+
+  /**
+   * Начинает новое чтение, прервав предыдущее.
+   *   opts: { lang: "ru" | "en", rate, kids, onChunk(tag) }
+   * Возвращает объект: add(sentence, tag, paragraphBreakAfter), end(), done (Promise<"finished" | "stopped" | "failed">).
+   */
+  open(opts = {}) {
+    const my = ++this.gen;
+    if (!this.cloudOn) {
+      this.use(this.sys);
+      return this.track(this.sys.open(opts));
+    }
+    this.use(this.cloud);
+    this.sys.unlock(); // на случай, если придётся дочитывать голосом телефона
+    const first = this.cloud.open(opts);
+    let inner = first;
+    let ended = false;
+    const done = first.done.then((result) => {
+      if (result !== "failed") return result;
+      const err = this.cloud.lastError;
+      this.coolUntil = Date.now() + (COOL_MS[err?.kind] || 15000);
+      if (my !== this.gen) return "stopped";
+      if (!this.sys.supported) {
+        toast(ttsErrorText(err), 6000);
+        this.onBroken?.();
+        return "failed";
+      }
+      toast(`${ttsErrorText(err)} ${t("tts.fallback")}`, 7000);
+      this.use(this.sys);
+      inner = this.sys.open(opts);
+      for (const it of first.rest()) inner.add(it.text, it.tag, it.br);
+      if (ended) inner.end();
+      return inner.done;
+    });
+    return this.track({
+      add: (sentence, tag, br) => inner.add(sentence, tag, br),
+      end: () => {
+        ended = true;
+        inner.end();
+      },
+      done,
+    });
+  }
+
+  /** Произносит готовый текст целиком. */
+  say(text, opts) {
+    const reading = this.open(opts);
+    for (const s of splitSentences(text)) reading.add(s.text, null, s.br);
+    reading.end();
+    return reading.done;
+  }
+
+  /** Заранее готовит начало следующей истории, чтобы она зазвучала без паузы (только для нейросетевого голоса). */
+  prepare(sentences, opts) {
+    if (this.cloudOn) this.cloud.prepare(sentences, opts);
+  }
+
+  /**
+   * Проба голоса из настроек: без подмены на голос телефона, чтобы было видно, работает ли сервис.
+   * Возвращает { ok, cloud, error }.
+   */
+  async sample(text, opts) {
+    this.stop();
+    this.coolUntil = 0;
+    if (this.cloud.ready) {
+      this.eng = this.cloud;
+      const result = await this.cloud.say(text, opts, splitSentences);
+      return { ok: result !== "failed", cloud: true, error: result === "failed" ? this.cloud.lastError : null };
+    }
+    this.eng = this.sys;
+    const result = await this.sys.say(text, opts);
+    return { ok: result !== "failed", cloud: false, error: null };
+  }
+
+  stop() {
+    this.gen++;
+    this.sys.stop();
+    this.cloud.stop();
+  }
+
+  pause() {
+    this.eng.pause();
+  }
+
+  resume() {
+    this.eng.resume();
+  }
+
+  /** Ждёт, пока договорит текущее чтение (если оно есть). */
+  whenIdle() {
+    return this.curDone || Promise.resolve("finished");
+  }
+}
+
+export const speaker = new Voice();
 export const listener = new Listener();

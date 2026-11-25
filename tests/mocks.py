@@ -2,12 +2,14 @@
 
 Все тексты здесь - заглушки для тестов, а не исторические сведения.
 """
+import base64
 import json
 import math
 import re
 import struct
+import subprocess
 import zlib
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 CORS = {
     "access-control-allow-origin": "*",
@@ -394,11 +396,153 @@ class Claude:
         return 200, "application/json", json.dumps(message("ok", model))
 
 
-def install(context, claude):
+def wav_silence(seconds, rate=24000):
+    """Тишина в WAV: 16 бит, моно (так отвечает Gemini)."""
+    n = int(rate * seconds) * 2
+    head = b"RIFF" + struct.pack("<I", 36 + n) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16) + b"data" + struct.pack("<I", n)
+    return head + b"\x00" * n
+
+
+_MP3 = {}
+
+
+def mp3_silence(seconds):
+    """Тишина в MP3 (так отвечает ElevenLabs). Настоящий файл, чтобы браузер проигрывал его как обычно."""
+    key = round(seconds, 2)
+    if key not in _MP3:
+        out = subprocess.run(
+            ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", str(key), "-b:a", "64k", "-f", "mp3", "-"],
+            capture_output=True,
+            check=True,
+        )
+        _MP3[key] = out.stdout
+    return _MP3[key]
+
+
+ELEVEN_VOICES = {
+    "voices": [
+        {"voice_id": "JBFqnCBsd6RMkjVDRZzb", "name": "George - Warm Storyteller", "category": "premade", "labels": {"gender": "male", "use_case": "narrative_story"}, "verified_languages": [{"language": "en", "model_id": "eleven_v4"}]},
+        {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah - Confident", "category": "premade", "labels": {"gender": "female", "use_case": "entertainment_tv"}, "verified_languages": [{"language": "en", "model_id": "eleven_v4"}]},
+        {"voice_id": "ruVoice00000000000001", "name": "Алиса - тестовый русский голос", "category": "professional", "labels": {"gender": "female", "use_case": "narrative_story"}, "verified_languages": [{"language": "ru", "model_id": "eleven_v4"}]},
+    ]
+}
+ELEVEN_KEY = "el-test-000000000000"
+GEMINI_KEY = "gm-test-000000000000"
+
+
+class Tts:
+    """Подставные сервисы голоса: ElevenLabs и Gemini. Запоминают запросы и проверяют их по правилам документации."""
+
+    def __init__(self):
+        self.calls = []  # {provider, model, voice, text, style, legacy, ...}
+        self.problems = []
+        self.seconds = 0.3  # длительность звука на один запрос
+        self.per_char = 0.0  # плюс столько секунд за каждый знак текста
+        self.fail = []  # очередь ответов-отказов: (status, body) на следующие запросы
+        self.fail_after = None  # (n, status, body): отказывать всем запросам после n удачных
+        self.reject_extras = False  # сервис не принимает необязательные поля (новый вид запроса)
+        self.daily = set()  # модели, у которых исчерпан суточный лимит
+        self.voice_calls = 0
+
+    def duration(self, text):
+        return round(self.seconds + self.per_char * len(text), 2)
+
+    def planned_failure(self):
+        if self.fail:
+            return self.fail.pop(0)
+        if self.fail_after and len(self.calls) >= self.fail_after[0]:
+            return self.fail_after[1:]
+        return None
+
+    def eleven(self, request, url):
+        path = urlparse(url).path
+        if request.method == "GET" and path == "/v1/voices":
+            self.voice_calls += 1
+            return 200, "application/json", json.dumps(ELEVEN_VOICES, ensure_ascii=False)
+        m = re.fullmatch(r"/v1/text-to-speech/([^/]+)", path)
+        if not (request.method == "POST" and m):
+            self.problems.append(f"ElevenLabs: неожиданный запрос {request.method} {path}")
+            return 404, "application/json", json.dumps({"detail": {"status": "not_found", "message": "Not found"}})
+        body = json.loads(request.post_data or "{}")
+        if request.headers.get("xi-api-key") != ELEVEN_KEY:
+            return 401, "application/json", json.dumps({"detail": {"type": "authentication_error", "code": "unauthorized", "message": "Invalid API key", "status": "invalid_api_key"}})
+        if parse_qs(urlparse(url).query).get("output_format") != ["mp3_44100_128"]:
+            self.problems.append("ElevenLabs: нет output_format=mp3_44100_128")
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            self.problems.append("ElevenLabs: пустой text")
+        if len(text or "") > 5000:
+            self.problems.append(f"ElevenLabs: слишком длинный text ({len(text)})")
+        if "<" in (text or "") or ">" in (text or ""):
+            self.problems.append("ElevenLabs: в тексте угловые скобки")
+        known = {"text", "model_id", "language_code", "previous_text", "next_text", "voice_settings", "seed", "apply_text_normalization"}
+        if set(body) - known:
+            self.problems.append(f"ElevenLabs: неизвестные поля {sorted(set(body) - known)}")
+        model = body.get("model_id")
+        if model not in ("eleven_v4", "eleven_v4_turbo", "eleven_multilingual_v2"):
+            return 400, "application/json", json.dumps({"detail": {"status": "model_not_found", "message": f"Model {model} was not found"}})
+        if model == "eleven_multilingual_v2" and "language_code" in body:
+            self.problems.append("ElevenLabs: language_code не поддерживается моделью multilingual_v2")
+        extras = sorted(set(body) - {"text", "model_id"})
+        if self.reject_extras and extras:
+            return 422, "application/json", json.dumps({"detail": [{"loc": ["body", extras[0]], "msg": "extra fields not permitted", "type": "value_error.extra"}]})
+        bad = self.planned_failure()
+        if bad:
+            return bad[0], "application/json", json.dumps(bad[1])
+        self.calls.append({"provider": "eleven", "model": model, "voice": unquote(m.group(1)), "text": text, "lang": body.get("language_code"), "prev": body.get("previous_text"), "minimal": not extras})
+        return 200, "audio/mpeg", mp3_silence(self.duration(text))
+
+    def gemini(self, request, url):
+        m = re.fullmatch(r"/v1beta/models/([^/:]+):generateContent", urlparse(url).path)
+        if not (request.method == "POST" and m):
+            self.problems.append(f"Gemini: неожиданный запрос {request.method} {urlparse(url).path}")
+            return 404, "application/json", json.dumps({"error": {"code": 404, "message": "Not found", "status": "NOT_FOUND"}})
+        model = m.group(1)
+        if "key=" in urlparse(url).query:
+            self.problems.append("Gemini: ключ нельзя передавать в адресе")
+        if request.headers.get("x-goog-api-key") != GEMINI_KEY:
+            return 400, "application/json", json.dumps({"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT", "details": [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "API_KEY_INVALID", "domain": "googleapis.com"}]}})
+        if model not in ("gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"):
+            return 404, "application/json", json.dumps({"error": {"code": 404, "message": f"models/{model} is not found for API version v1beta", "status": "NOT_FOUND"}})
+        body = json.loads(request.post_data or "{}")
+        try:
+            parts = body["contents"][0]["parts"]
+            text = parts[0]["text"]
+            cfg = body["generationConfig"]
+            vc = cfg["speechConfig"]["voiceConfig"]
+        except (KeyError, IndexError, TypeError) as e:
+            self.problems.append(f"Gemini: неверное тело запроса ({e!r})")
+            return 400, "application/json", json.dumps({"error": {"code": 400, "message": "Invalid JSON payload received.", "status": "INVALID_ARGUMENT"}})
+        if cfg.get("responseModalities") != ["AUDIO"]:
+            self.problems.append("Gemini: responseModalities должно быть [AUDIO]")
+        if len(parts) != 1 or not isinstance(text, str) or not text.strip():
+            self.problems.append("Gemini: нужен один непустой text")
+        if "<" in text or ">" in text:
+            self.problems.append("Gemini: в тексте угловые скобки (сервис читает их как команды)")
+        legacy = "prebuiltVoiceConfig" in vc
+        voice = vc["prebuiltVoiceConfig"].get("voiceName") if legacy else vc.get("voice")
+        style = (parts[0].get("speech_metadata") or {}).get("style")
+        if not voice:
+            self.problems.append("Gemini: не указан голос")
+        if self.reject_extras and (not legacy or style):
+            return 400, "application/json", json.dumps({"error": {"code": 400, "message": 'Invalid JSON payload received. Unknown name "speech_metadata" at \'contents[0].parts[0]\': Cannot find field.', "status": "INVALID_ARGUMENT"}})
+        if model in self.daily:
+            return 429, "application/json", json.dumps({"error": {"code": 429, "message": "You exceeded your current quota: 100 requests per day on Tier 1.", "status": "RESOURCE_EXHAUSTED", "details": [{"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{"quotaMetric": "generativelanguage.googleapis.com/generate_requests_per_model_per_day", "quotaId": "GenerateRequestsPerDayPerProjectPerModel", "quotaValue": "100"}]}]}})
+        bad = self.planned_failure()
+        if bad:
+            return bad[0], "application/json", json.dumps(bad[1])
+        self.calls.append({"provider": "gemini", "model": model, "voice": voice, "text": text, "style": style, "legacy": legacy})
+        audio = base64.b64encode(wav_silence(self.duration(text))).decode()
+        return 200, "application/json", json.dumps({"candidates": [{"content": {"role": "model", "parts": [{"inlineData": {"mimeType": "audio/wav", "data": audio}}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 25}})
+
+
+def install(context, claude, tts=None):
     """Перехватывает все внешние запросы страницы."""
 
     def handler(route, request):
         url = request.url
+        if url.startswith(("blob:", "data:")):  # звук из памяти страницы (в Safari такие запросы тоже проходят через перехват)
+            return route.continue_()
         host = urlparse(url).hostname or ""
         if host in ("localhost", "127.0.0.1"):
             return route.continue_()
@@ -420,6 +564,9 @@ def install(context, claude):
             if host == "api.anthropic.com":
                 status, ctype, body = claude.respond(json.loads(request.post_data or "{}"), request.headers)
                 return route.fulfill(status=status, headers={**CORS, "content-type": ctype, "request-id": "req_test"}, body=body)
+            if tts and host in ("api.elevenlabs.io", "generativelanguage.googleapis.com"):
+                status, ctype, body = tts.eleven(request, url) if host == "api.elevenlabs.io" else tts.gemini(request, url)
+                return route.fulfill(status=status, headers={**CORS, "content-type": ctype}, body=body)
         except Exception as e:  # noqa: BLE001
             claude.problems.append(f"ошибка заглушки для {url[:120]}: {e!r}")
             return route.fulfill(status=500, headers=CORS, body="mock error")
@@ -475,5 +622,48 @@ FAKE_SPEECH = r"""
   }
   window.SpeechRecognition = FakeSR;
   window.webkitSpeechRecognition = FakeSR;
+})();
+"""
+
+
+# Подставная геолокация: что отвечает "телефон", задаётся в localStorage (ключ __geo) и читается при каждом запросе,
+# поэтому тест может "починить" её на ходу. Вид: {"fine": ответ, "coarse": ответ, "perm": "prompt"},
+# где ответ - {"after": мс, "lat", "lon", "acc"} или {"after": мс, "error": код}, либо null (молчит).
+FAKE_GEO = r"""
+(() => {
+  const read = () => { try { return JSON.parse(localStorage.getItem("__geo") || "null"); } catch (e) { return null; } };
+  if (!read()) return;
+  const calls = (window.__geoCalls = []);
+  const timers = {};
+  let id = 0;
+  const fire = (spec, ok, err) => {
+    if (!spec) return null;
+    return setTimeout(() => {
+      if (spec.error) err && err({ code: spec.error, message: spec.message || "mock geolocation error" });
+      else ok({ coords: { latitude: spec.lat, longitude: spec.lon, accuracy: spec.acc }, timestamp: Date.now() });
+    }, spec.after || 0);
+  };
+  const pick = (opts) => { const c = read() || {}; return opts && opts.enableHighAccuracy ? c.fine : c.coarse; };
+  const geo = {
+    getCurrentPosition(ok, err, opts) { calls.push("get:" + (opts && opts.enableHighAccuracy ? "fine" : "coarse")); fire(pick(opts), ok, err); },
+    watchPosition(ok, err, opts) { const my = ++id; calls.push("watch:" + (opts && opts.enableHighAccuracy ? "fine" : "coarse")); const spec = pick(opts); timers[my] = (Array.isArray(spec) ? spec : [spec]).map((x) => fire(x, ok, err)); return my; },
+    clearWatch(i) { (timers[i] || []).forEach(clearTimeout); calls.push("clear"); },
+  };
+  Object.defineProperty(navigator, "geolocation", { value: geo, configurable: true });
+  const perm = (read() || {}).perm;
+  if (perm && navigator.permissions) {
+    const real = navigator.permissions.query.bind(navigator.permissions);
+    navigator.permissions.query = (d) => (d && d.name === "geolocation" ? Promise.resolve({ state: (read() || {}).perm || perm, onchange: null }) : real(d));
+  }
+})();
+"""
+
+# Запоминает созданные проигрыватели звука, чтобы тест мог посмотреть, что и как играет.
+AUDIO_SPY = r"""
+(() => {
+  const Real = window.Audio;
+  window.__audios = [];
+  window.Audio = function (...args) { const a = new Real(...args); window.__audios.push(a); return a; };
+  window.Audio.prototype = Real.prototype;
 })();
 """

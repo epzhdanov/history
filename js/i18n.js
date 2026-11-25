@@ -9,23 +9,148 @@ const STR = {
   "home.locate": { ru: "Показать, где я", en: "Show where I am" },
   "home.pick": { ru: "Выбрать точку на карте", en: "Pick a point on the map" },
   "home.pickHint": { ru: "Нажмите на карту в нужном месте", en: "Tap the map where you want to look" },
+  "home.pickSelf": { ru: "Нажмите на карту там, где стоите", en: "Tap the map where you are standing" },
   "home.pickDestHint": { ru: "Нажмите на карту там, куда идёте", en: "Tap the map where you are heading" },
   "home.manual": { ru: "Точка выбрана вручную", en: "Point picked by hand" },
   "home.backToMe": { ru: "Вернуться ко мне", en: "Back to me" },
-  "home.geoDenied": {
-    ru: "Нет доступа к геолокации. Разрешите его в настройках браузера или выберите точку на карте.",
-    en: "No access to your location. Allow it in the browser settings or pick a point on the map.",
-  },
-  "home.geoFailed": {
-    ru: "Не получилось определить место. Попробуйте ещё раз или выберите точку на карте.",
-    en: "Could not find your location. Try again or pick a point on the map.",
-  },
+  "home.geoDenied": { ru: "Нет доступа к геолокации", en: "No access to your location" },
+  "home.geoFailed": { ru: "Телефон не смог определить место", en: "The phone could not find your location" },
+  "home.geoSlow": { ru: "Телефон пока не ответил, где вы", en: "The phone has not reported your location yet" },
+  "home.geoRough": { ru: "Место определено только примерно, с точностью {dist}", en: "Your location is only approximate, within {dist}" },
   "home.geoInsecure": {
     ru: "Геолокация работает только по защищённому адресу https.",
     en: "Location only works over a secure https address.",
   },
+  "home.geoUnsupported": { ru: "Этот браузер не умеет определять место.", en: "This browser cannot find your location." },
+  "home.geoHow": { ru: "Как включить", en: "How to allow" },
+  "home.geoFix": { ru: "Как уточнить", en: "How to fix" },
+  "home.geoWhat": { ru: "Что проверить", en: "What to check" },
+  "home.geoAgain": { ru: "Ещё раз", en: "Try again" },
+  "home.geoPick": { ru: "Указать место", en: "Set the place" },
+  "home.manualSet": {
+    ru: "Смотрю вокруг выбранной точки. Вернуться к себе можно кнопкой с прицелом.",
+    en: "Looking around the picked point. The crosshair button brings you back to yourself.",
+  },
   "home.accuracy": { ru: "точность около {m} м", en: "accurate to about {m} m" },
   "home.unknownPlace": { ru: "Место на карте", en: "Point on the map" },
+
+  "where.label": { ru: "Где вы сейчас", en: "Where you are now" },
+  "where.placeholder": { ru: "Адрес или название места", en: "Address or place name" },
+  "where.hint": {
+    ru: "Найдите место по названию или нажмите на карту там, где стоите.",
+    en: "Find the place by name or tap the map where you are standing.",
+  },
+  "where.searching": { ru: "Ищу", en: "Searching" },
+
+  // Подсказка про геолокацию
+  "geo.title": { ru: "Геолокация", en: "Location" },
+  "geo.lead.denied": {
+    ru: "Сайту закрыт доступ к геолокации. Открыть его можно так:",
+    en: "This site is not allowed to see your location. Here is how to allow it:",
+  },
+  "geo.lead.rough": {
+    ru: "Телефон сообщает только примерное место, с точностью {dist}. Чтобы рассказать о том, что рядом, нужно точное.",
+    en: "The phone reports only an approximate location, within {dist}. Telling you what is nearby needs a precise one.",
+  },
+  "geo.lead.failed": { ru: "Телефон не смог определить, где вы.", en: "The phone could not work out where you are." },
+  "geo.lead.slow": {
+    ru: "Телефон пока не ответил. Если на экране был запрос на доступ к геолокации, выберите «Разрешить».",
+    en: "The phone has not answered yet. If a location request appeared on screen, choose Allow.",
+  },
+  "geo.lead.inapp": {
+    ru: "Сайт открыт внутри другого приложения. Его встроенный браузер часто не отдаёт геолокацию.",
+    en: "The site is open inside another app. Its built-in browser often withholds location.",
+  },
+  "geo.lead.ok": { ru: "Геолокация работает.", en: "Location is working." },
+  "geo.yourBrowser": { ru: "ваш браузер", en: "your browser" },
+  "geo.ios.services": {
+    ru: "Откройте «Настройки» телефона → «Конфиденциальность и безопасность» → «Службы геолокации». Переключатель сверху должен быть включён.",
+    en: "Open the phone's Settings → Privacy & Security → Location Services. The switch at the top must be on.",
+  },
+  "geo.ios.safariSites": { ru: "Сайты Safari", en: "Safari Websites" },
+  "geo.ios.safari": {
+    ru: "Там же в списке выберите «Сайты Safari» → «При использовании приложения» и включите «Точная геопозиция».",
+    en: "In the list below choose Safari Websites → While Using the App and turn on Precise Location.",
+  },
+  "geo.ios.app": {
+    ru: "Там же в списке выберите «{app}» → «При использовании приложения» и включите «Точная геопозиция».",
+    en: "In the list below choose {app} → While Using the App and turn on Precise Location.",
+  },
+  "geo.ios.site": {
+    ru: "Вернитесь в Safari. Если доступ всё ещё закрыт, нажмите значок слева в адресной строке → «Настройки веб-сайта» → «Геопозиция» → «Разрешить».",
+    en: "Go back to Safari. If access is still closed, tap the icon at the left of the address bar → Website Settings → Location → Allow.",
+  },
+  "geo.ios.precise": {
+    ru: "«Настройки» → «Конфиденциальность и безопасность» → «Службы геолокации» → «{app}»: включите «Точная геопозиция».",
+    en: "Settings → Privacy & Security → Location Services → {app}: turn on Precise Location.",
+  },
+  "geo.android.site": {
+    ru: "Нажмите значок слева от адреса сайта → «Разрешения» → «Геоданные» и включите доступ.",
+    en: "Tap the icon to the left of the site address → Permissions → Location and allow it.",
+  },
+  "geo.android.app": {
+    ru: "Если такого пункта нет: «Настройки» телефона → «Приложения» → «{app}» → «Разрешения» → «Местоположение» → «Разрешить только во время использования». Включите «Использовать точное местоположение».",
+    en: "If that item is missing: the phone's Settings → Apps → {app} → Permissions → Location → Allow only while using the app. Turn on Use precise location.",
+  },
+  "geo.android.switch": {
+    ru: "Проверьте, что в шторке быстрых настроек включено «Местоположение».",
+    en: "Check that Location is on in the quick settings panel.",
+  },
+  "geo.android.precise": {
+    ru: "«Настройки» → «Приложения» → «{app}» → «Разрешения» → «Местоположение»: включите «Использовать точное местоположение».",
+    en: "Settings → Apps → {app} → Permissions → Location: turn on Use precise location.",
+  },
+  "geo.desktop.site": {
+    ru: "Нажмите значок слева от адреса сайта и разрешите доступ к местоположению.",
+    en: "Click the icon to the left of the site address and allow location access.",
+  },
+  "geo.desktop.os": {
+    ru: "На Mac проверьте: «Системные настройки» → «Конфиденциальность и безопасность» → «Службы геолокации», браузер должен быть включён в списке.",
+    en: "On a Mac check System Settings → Privacy & Security → Location Services: the browser must be switched on in the list.",
+  },
+  "geo.desktop.rough": {
+    ru: "У компьютера без GPS место определяется по сети и часто неточно. Проще указать место самому.",
+    en: "A computer without GPS finds its location from the network, often imprecisely. Setting the place yourself is easier.",
+  },
+  "geo.inapp.openIos": {
+    ru: "Откройте меню этого окна (обычно «…» или значок «Поделиться») и выберите «Открыть в Safari».",
+    en: "Open this window's menu (usually “…” or the Share icon) and choose Open in Safari.",
+  },
+  "geo.inapp.openAndroid": {
+    ru: "Откройте меню этого окна (обычно «⋮») и выберите «Открыть в Chrome».",
+    en: "Open this window's menu (usually “⋮”) and choose Open in Chrome.",
+  },
+  "geo.inapp.copy": {
+    ru: "Или скопируйте адрес кнопкой ниже и вставьте его в браузере.",
+    en: "Or copy the address with the button below and paste it into the browser.",
+  },
+  "geo.step.allow": {
+    ru: "Когда появится запрос на доступ к геолокации, выберите «Разрешить».",
+    en: "When the location request appears, choose Allow.",
+  },
+  "geo.step.retry": {
+    ru: "Нажмите «Проверить снова». Когда появится запрос, выберите «Разрешить».",
+    en: "Press Check again. When the request appears, choose Allow.",
+  },
+  "geo.step.back": { ru: "Вернитесь сюда и нажмите «Проверить снова».", en: "Come back here and press Check again." },
+  "geo.fail.on": { ru: "Проверьте, что геолокация на телефоне включена.", en: "Check that location is switched on in the phone." },
+  "geo.fail.sky": {
+    ru: "Выйдите на улицу или подойдите к окну: в помещении сигнал слабый.",
+    en: "Step outside or move to a window: the signal is weak indoors.",
+  },
+  "geo.fail.retry": {
+    ru: "Нажмите «Проверить снова». Если не поможет, укажите место сами.",
+    en: "Press Check again. If that does not help, set the place yourself.",
+  },
+  "geo.retry": { ru: "Проверить снова", en: "Check again" },
+  "geo.pick": { ru: "Указать место самому", en: "Set the place yourself" },
+  "geo.copy": { ru: "Скопировать адрес сайта", en: "Copy the site address" },
+  "geo.copied": { ru: "Адрес скопирован", en: "Address copied" },
+  "geo.copyFailed": { ru: "Скопировать не получилось", en: "Could not copy" },
+  "geo.found": { ru: "Место определено", en: "Location found" },
+  "geo.diag": { ru: "Что ответил телефон (для разбора)", en: "What the phone reported (for troubleshooting)" },
+  "geo.diagCopy": { ru: "Скопировать", en: "Copy" },
+  "geo.diagCopied": { ru: "Скопировано", en: "Copied" },
 
   "tab.nearby": { ru: "Рядом со мной", en: "Around me" },
   "tab.route": { ru: "Иду в…", en: "Walking to…" },
@@ -145,6 +270,7 @@ const STR = {
     en: "If you hear nothing, turn the volume up and switch silent mode off.",
   },
   "s.skipStory": { ru: "Пропустить историю", en: "Skip this story" },
+  "s.tapToPlay": { ru: "Нажмите кнопку «слушать», чтобы включить звук.", en: "Press the play button to turn the sound on." },
   "s.ttsBroken": {
     ru: "Голос на этом устройстве не запустился. Показываю текстом.",
     en: "The voice did not start on this device. Showing text instead.",
@@ -211,7 +337,90 @@ const STR = {
   "set.quiz.open": { ru: "Открытый вопрос", en: "Open question" },
   "set.quiz.off": { ru: "Не задавать", en: "None" },
   "set.voice": { ru: "Голос", en: "Voice" },
+  "set.voiceWho": { ru: "Кто читает", en: "Who reads" },
+  "set.voice.system": { ru: "Голос телефона", en: "The phone's voice" },
+  "set.voice.systemNote": {
+    ru: "Бесплатно и без ключа, но звучит механически.",
+    en: "Free and needs no key, but sounds mechanical.",
+  },
+  "set.voice.elevenNote": {
+    ru: "Самый выразительный рассказчик. Около 7 центов за минуту рассказа, первые 10 минут в месяц бесплатно.",
+    en: "The most expressive narrator. About 7 cents per minute of storytelling; the first 10 minutes each month are free.",
+  },
+  "set.voice.geminiNote": {
+    ru: "Живой голос примерно в пять раз дешевле. У Google есть суточный лимит запросов, на долгую прогулку его может не хватить.",
+    en: "A lively voice at about a fifth of the price. Google caps requests per day, which may not cover a long walk.",
+  },
+  "set.ttsKey": { ru: "Ключ {name}", en: "{name} key" },
+  "set.ttsKeyNote": {
+    ru: "Ключ хранится только в этом браузере и отправляется только в {host}.",
+    en: "The key is kept only in this browser and is sent only to {host}.",
+  },
+  "set.eleven.how1": {
+    ru: "Откройте elevenlabs.io, войдите и выберите слева Developers, вкладка API Keys.",
+    en: "Open elevenlabs.io, sign in and choose Developers on the left, then the API Keys tab.",
+  },
+  "set.eleven.how2": {
+    ru: "Нажмите Create Key. Если включён Restrict Key, дайте доступ Text to Speech и Voices. Скопируйте ключ и вставьте сюда.",
+    en: "Press Create Key. If Restrict Key is on, give access to Text to Speech and Voices. Copy the key and paste it here.",
+  },
+  "set.gemini.how1": {
+    ru: "Откройте aistudio.google.com/apikey и войдите в Google.",
+    en: "Open aistudio.google.com/apikey and sign in to Google.",
+  },
+  "set.gemini.how2": {
+    ru: "Нажмите Create API key, скопируйте ключ и вставьте сюда. Для долгих прогулок там же включите оплату (Set up billing).",
+    en: "Press Create API key, copy the key and paste it here. For long walks turn on billing there too (Set up billing).",
+  },
+  "set.ttsSave": { ru: "Сохранить и послушать", en: "Save and listen" },
+  "set.ttsChecking": { ru: "Запрашиваю голос", en: "Asking for the voice" },
+  "set.ttsOk": { ru: "Работает. Так будут звучать истории.", en: "It works. This is how the stories will sound." },
+  "set.ttsNeedKey": {
+    ru: "Вставьте ключ, и истории зазвучат этим голосом. Пока читает голос телефона.",
+    en: "Paste a key and the stories will use this voice. Until then the phone's voice reads.",
+  },
+  "set.ttsModel": { ru: "Модель", en: "Model" },
+  "set.model.eleven_v4": { ru: "Eleven v4: лучшее качество", en: "Eleven v4: best quality" },
+  "set.model.eleven_v4_turbo": { ru: "Eleven v4 Turbo: быстрее и вдвое дешевле", en: "Eleven v4 Turbo: faster and half the price" },
+  "set.model.gemini-3.8-flash-tts": { ru: "Gemini 3.8 Flash TTS: лучшее качество", en: "Gemini 3.8 Flash TTS: best quality" },
+  "set.model.gemini-3.8-flash-lite-tts": { ru: "Gemini 3.8 Flash-Lite TTS: дешевле", en: "Gemini 3.8 Flash-Lite TTS: cheaper" },
+  "set.voiceLoading": { ru: "Загружаю список голосов", en: "Loading the voice list" },
   "set.voicePick": { ru: "Чей голос", en: "Which voice" },
+  "voice.f": { ru: "жен.", en: "female" },
+  "voice.m": { ru: "муж.", en: "male" },
+  "gv.warm": { ru: "тёплый", en: "warm" },
+  "gv.friendly": { ru: "дружелюбный", en: "friendly" },
+  "gv.gentle": { ru: "нежный", en: "gentle" },
+  "gv.informative": { ru: "обстоятельный", en: "informative" },
+  "gv.breezy": { ru: "лёгкий", en: "breezy" },
+  "gv.upbeat": { ru: "бодрый", en: "upbeat" },
+  "gv.soft": { ru: "мягкий", en: "soft" },
+  "gv.gravelly": { ru: "с хрипотцой", en: "gravelly" },
+  "gv.smooth": { ru: "плавный", en: "smooth" },
+  "gv.firm": { ru: "твёрдый", en: "firm" },
+  "gv.bright": { ru: "звонкий", en: "bright" },
+  "gv.easygoing": { ru: "спокойный", en: "easy-going" },
+  "gv.breathy": { ru: "с придыханием", en: "breathy" },
+  "gv.clear": { ru: "чёткий", en: "clear" },
+  "gv.excitable": { ru: "азартный", en: "excitable" },
+  "gv.mature": { ru: "зрелый", en: "mature" },
+  "gv.youthful": { ru: "юный", en: "youthful" },
+  "gv.forward": { ru: "напористый", en: "forward" },
+  "gv.lively": { ru: "живой", en: "lively" },
+  "gv.knowledgeable": { ru: "знающий", en: "knowledgeable" },
+  "gv.even": { ru: "ровный", en: "even" },
+  "gv.casual": { ru: "непринуждённый", en: "casual" },
+
+  // Нейросетевой голос: что пошло не так
+  "tts.service": { ru: "Сервис голоса", en: "The voice service" },
+  "tts.err.auth": { ru: "Ключ {name} не подошёл.", en: "The {name} key was rejected." },
+  "tts.err.permission": { ru: "{name} не разрешил озвучку с этим ключом.", en: "{name} did not allow speech with this key." },
+  "tts.err.credit": { ru: "У {name} закончился запас символов или нужна оплата.", en: "{name} is out of characters or needs payment." },
+  "tts.err.rate": { ru: "{name} ограничил частоту запросов.", en: "{name} is limiting how often requests can be made." },
+  "tts.err.daily": { ru: "Суточный лимит запросов {name} исчерпан.", en: "The daily request limit of {name} is used up." },
+  "tts.err.network": { ru: "Нет связи с {name}.", en: "Cannot reach {name}." },
+  "tts.err.other": { ru: "{name} не смог озвучить текст.", en: "{name} could not voice the text." },
+  "tts.fallback": { ru: "Дальше читает голос телефона.", en: "The phone's voice takes over." },
   "set.voiceAuto": { ru: "Выбрать автоматически", en: "Choose automatically" },
   "set.voiceNone": {
     ru: "На этом устройстве нет голоса для этого языка. Его можно добавить в настройках телефона.",
@@ -258,7 +467,7 @@ let lang = "ru";
 
 export function setLang(l) {
   lang = l === "en" ? "en" : "ru";
-  document.documentElement.lang = lang;
+  if (typeof document !== "undefined") document.documentElement.lang = lang;
 }
 
 export const getLang = () => lang;

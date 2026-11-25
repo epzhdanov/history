@@ -61,7 +61,7 @@ export class MapView {
   setYou(p, accuracy) {
     this.youLayer.clearLayers();
     if (!p) return;
-    if (accuracy && accuracy > 25 && accuracy < 2000) {
+    if (accuracy && accuracy > 25 && accuracy < 60000) {
       L.circle(ll(p), { radius: accuracy, stroke: false, fillColor: COBALT, fillOpacity: 0.08, interactive: false }).addTo(this.youLayer);
     }
     L.circleMarker(ll(p), { radius: 8, color: "#fff", weight: 3, fillColor: "#1f6fff", fillOpacity: 1, interactive: false }).addTo(this.youLayer);
@@ -93,6 +93,12 @@ export class MapView {
 
   clearArea() {
     this.areaLayer.clearLayers();
+  }
+
+  /** Показать на карте круг целиком (например, область примерной геопозиции). */
+  showCircle(center, radius) {
+    if (!center) return;
+    this.fit(L.latLng(ll(center)).toBounds(Math.max(200, radius * 2)));
   }
 
   /** Найденные места: кружки, чем известнее место, тем крупнее. */
