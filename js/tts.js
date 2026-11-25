@@ -290,8 +290,12 @@ export function recover(p, rt, err, tries, used = rt) {
       const wait = err.retryAfter || 1500 * tries;
       return wait <= 20000 ? wait : -1;
     }
+    case "blocked":
+    case "audio":
+      return tries <= 2 ? 700 : -1;
     default:
-      return tries <= 2 ? 700 * tries : -1;
+      // Сеть на улице часто пропадает на несколько секунд: лучше короткая пауза, чем переход на голос телефона.
+      return tries <= 3 ? 800 * 2 ** (tries - 1) : -1;
   }
 }
 

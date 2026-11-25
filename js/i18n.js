@@ -348,8 +348,8 @@ const STR = {
     en: "The most expressive narrator. About 7 cents per minute of storytelling; the first 10 minutes each month are free.",
   },
   "set.voice.geminiNote": {
-    ru: "Живой голос примерно в пять раз дешевле. У Google есть суточный лимит запросов, на долгую прогулку его может не хватить.",
-    en: "A lively voice at about a fifth of the price. Google caps requests per day, which may not cover a long walk.",
+    ru: "Живой голос в несколько раз дешевле. У Google есть суточный лимит запросов, на долгую прогулку его может не хватить.",
+    en: "A lively voice that costs several times less. Google caps requests per day, which may not cover a long walk.",
   },
   "set.ttsKey": { ru: "Ключ {name}", en: "{name} key" },
   "set.ttsKeyNote": {

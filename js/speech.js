@@ -562,8 +562,9 @@ class Voice {
 
   /** Вызывается из обработчика нажатия: без этого телефон не даст заговорить позже, после ответа сети. */
   unlock() {
+    // Только тот голос, который будет читать: на iPhone встроенный синтезатор и проигрыватель лучше не будить разом.
     if (this.cloudOn) this.cloud.unlock();
-    this.sys.unlock();
+    else this.sys.unlock();
   }
 
   use(eng) {
@@ -593,7 +594,6 @@ class Voice {
       return this.track(this.sys.open(opts));
     }
     this.use(this.cloud);
-    this.sys.unlock(); // на случай, если придётся дочитывать голосом телефона
     const first = this.cloud.open(opts);
     let inner = first;
     let ended = false;

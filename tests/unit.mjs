@@ -312,8 +312,10 @@ test("после ошибки выбирается разумное продол
   assert.equal(recover(p, rt, { kind: "daily" }, 3), -1, "моделей больше нет");
   assert.equal(recover(p, rt, { kind: "rate", retryAfter: 4000 }, 1), 4000);
   assert.equal(recover(p, rt, { kind: "rate", retryAfter: 60000 }, 1), -1, "минуту ждать не будем");
-  assert.equal(recover(p, rt, { kind: "server" }, 1), 700);
-  assert.equal(recover(p, rt, { kind: "server" }, 3), -1);
+  assert.equal(recover(p, rt, { kind: "network" }, 1), 800);
+  assert.equal(recover(p, rt, { kind: "server" }, 3), 3200, "сеть на улице пропадает: пробуем подольше");
+  assert.equal(recover(p, rt, { kind: "server" }, 4), -1);
+  assert.equal(recover(p, rt, { kind: "blocked" }, 3), -1);
   // Два запроса ушли одновременно и оба получили отказ: настройки переключаются один раз, а не дважды.
   const shared = { model: 0, minimal: false, plainVoice: false };
   const sentWith = { ...shared };
