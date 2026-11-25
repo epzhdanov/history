@@ -52,6 +52,7 @@ export function mountHome(root, { onGenerate }) {
     gps: null,
     gpsStatus: "idle",
     gpsSlow: false,
+    gpsSilent: false,
     manual: null,
     area: null,
     wikis: ["en"],
@@ -232,11 +233,11 @@ export function mountHome(root, { onGenerate }) {
       };
       const pick = [t("home.geoPick"), pickManually, true];
       if (S.gps && isRough(S.gps)) say(t("home.geoRough", { dist: fmtDist(S.gps.acc) }), true, [t("home.geoFix"), openHelp], pick);
-      else if (st === "denied") say(t("home.geoDenied"), true, [t("home.geoHow"), openHelp], pick);
+      else if (st === "denied") say(t(S.gpsSilent ? "home.geoDeniedSilent" : "home.geoDenied"), true, [t("home.geoHow"), openHelp], pick);
       else if (st === "unavailable" || st === "timeout") say(t("home.geoFailed"), true, [t("home.geoAgain"), () => retryLocation()], pick, [t("home.geoWhat"), openHelp, true]);
       else if (st === "insecure") say(t("home.geoInsecure"), true, pick);
       else if (st === "unsupported") say(t("home.geoUnsupported"), true, pick);
-      else if (S.gpsSlow) say(t("home.geoSlow"), false, [t("home.geoWhat"), openHelp], pick);
+      else if (S.gpsSlow) say(t("home.geoSlow"), false, [t("home.geoAgain"), () => retryLocation()], pick, [t("home.geoWhat"), openHelp, true]);
       else plaque.append(h("span", { class: "plaque-text" }, h("span", { class: "dots" }, t("home.locating"))));
       return;
     }
@@ -908,10 +909,11 @@ export function mountHome(root, { onGenerate }) {
     return false;
   }
 
-  onLocation(({ pos, status, slow }) => {
+  onLocation(({ pos, status, slow, silent }) => {
     const had = !!center();
     S.gpsStatus = status;
     S.gpsSlow = slow;
+    S.gpsSilent = silent;
     if (pos) S.gps = pos;
     map.setYou(S.gps, S.gps?.acc);
     if (S.manual) return updPlaque();

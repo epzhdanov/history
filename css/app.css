@@ -1636,6 +1636,12 @@ body[data-aud="kids"] .story-text p {
   overflow-wrap: anywhere;
 }
 
+.build {
+  margin: 10px 0 0;
+  font: 500 13px/1.3 var(--ui);
+  opacity: 0.75;
+}
+
 /* ---------- Всплывающее сообщение ---------- */
 .toast {
   position: fixed;

@@ -365,7 +365,11 @@ test("подсказка про геолокацию зависит от тел�
   assert.ok(inapp.inApp && inapp.steps[0].includes("Открыть в Safari"));
   const rough = geoAdvice(info("ok"), safari, { rough: true, acc: 4200 });
   assert.ok(rough.lead.includes("4,2 км") && rough.steps[0].includes("Точная геопозиция"));
-  assert.equal(geoAdvice(info("timeout"), safari).steps.length, 3);
+  const failed = geoAdvice(info("timeout"), safari);
+  assert.equal(failed.steps.length, 3);
+  assert.ok(failed.steps[0].includes("Сайты Safari"), "и при сбое первым делом проверяем доступ");
+  assert.ok(geoAdvice(info("asking"), { os: "android", browser: "chrome", standalone: false }).steps[0].includes("«Chrome»"));
+  assert.ok(geoAdvice({ ...info("denied"), silent: true }, safari).lead.includes("не показав вам вопроса"));
 });
 
 console.log(`\n${passed} проверок пройдено`);

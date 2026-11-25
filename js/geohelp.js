@@ -5,6 +5,7 @@ import { t, fmtDist } from "./i18n.js";
 import { openSheet } from "./sheet.js";
 import { locationInfo, currentPos, isRough, retryLocation, onLocation } from "./location.js";
 import { platform, browserName } from "./platform.js";
+import { BUILD } from "./build.js";
 
 /**
  * Что сказать человеку. Возвращает { lead, steps: [...], inApp }.
@@ -33,7 +34,7 @@ export function geoAdvice(info, p, { rough = false, acc = 0 } = {}) {
     } else {
       steps = [t("geo.desktop.site"), t("geo.desktop.os"), t("geo.step.retry")];
     }
-    return { lead: t("geo.lead.denied"), steps };
+    return { lead: t(info.silent ? "geo.lead.deniedSilent" : "geo.lead.denied"), steps };
   }
 
   if (state === "rough") {
@@ -47,10 +48,17 @@ export function geoAdvice(info, p, { rough = false, acc = 0 } = {}) {
   if (state === "unsupported") return { lead: t("home.geoUnsupported"), steps: [] };
   if (state === "ok") return { lead: t("geo.lead.ok"), steps: [] };
 
-  // Долго нет ответа или телефон ответил, что определить место не может.
+  // Долго нет ответа или телефон ответил, что определить место не может. Частая причина та же:
+  // браузеру не разрешена геолокация, поэтому первым шагом идёт проверка доступа.
+  const check =
+    p.os === "ios"
+      ? t("geo.ios.check", { app: p.browser === "safari" ? t("geo.ios.safariSites") : app || t("geo.yourBrowser") })
+      : p.os === "android"
+        ? t("geo.android.check", { app: app || t("geo.yourBrowser") })
+        : t("geo.desktop.site");
   return {
     lead: t(state === "asking" || state === "idle" ? "geo.lead.slow" : "geo.lead.failed"),
-    steps: [t("geo.fail.on"), t("geo.fail.sky"), t("geo.fail.retry")],
+    steps: [check, t("geo.fail.sky"), t("geo.fail.retry")],
   };
 }
 
@@ -58,7 +66,8 @@ export function geoAdvice(info, p, { rough = false, acc = 0 } = {}) {
 export function geoReport(info, p) {
   const e = info.error;
   return [
-    `status: ${info.status}${info.slow ? " (slow)" : ""}`,
+    `build: ${BUILD}`,
+    `status: ${info.status}${info.slow ? " (slow)" : ""}${info.silent ? " (no prompt)" : ""}`,
     `permission: ${info.perm}`,
     `error: ${e ? `${e.code} ${e.message} (${e.source})` : "-"}`,
     `accuracy: ${info.acc == null ? "-" : `${info.acc} m, ${info.age} s ago`}`,

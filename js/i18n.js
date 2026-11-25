@@ -14,6 +14,10 @@ const STR = {
   "home.manual": { ru: "Точка выбрана вручную", en: "Point picked by hand" },
   "home.backToMe": { ru: "Вернуться ко мне", en: "Back to me" },
   "home.geoDenied": { ru: "Нет доступа к геолокации", en: "No access to your location" },
+  "home.geoDeniedSilent": {
+    ru: "Телефон отказал в геолокации, не спросив вас: доступ выключен в настройках",
+    en: "The phone refused location without asking you: access is switched off in settings",
+  },
   "home.geoFailed": { ru: "Телефон не смог определить место", en: "The phone could not find your location" },
   "home.geoSlow": { ru: "Телефон пока не ответил, где вы", en: "The phone has not reported your location yet" },
   "home.geoRough": { ru: "Место определено только примерно, с точностью {dist}", en: "Your location is only approximate, within {dist}" },
@@ -48,14 +52,21 @@ const STR = {
     ru: "Сайту закрыт доступ к геолокации. Открыть его можно так:",
     en: "This site is not allowed to see your location. Here is how to allow it:",
   },
+  "geo.lead.deniedSilent": {
+    ru: "Браузер отказал сам, не показав вам вопроса. Так бывает, когда доступ к геолокации выключен в настройках телефона или сайта. Включить его можно так:",
+    en: "The browser refused on its own, without showing you a question. That happens when location access is switched off in the phone or site settings. Here is how to turn it on:",
+  },
   "geo.lead.rough": {
     ru: "Телефон сообщает только примерное место, с точностью {dist}. Чтобы рассказать о том, что рядом, нужно точное.",
     en: "The phone reports only an approximate location, within {dist}. Telling you what is nearby needs a precise one.",
   },
-  "geo.lead.failed": { ru: "Телефон не смог определить, где вы.", en: "The phone could not work out where you are." },
+  "geo.lead.failed": {
+    ru: "Телефон не смог определить, где вы. Чаще всего дело в доступе или в слабом сигнале:",
+    en: "The phone could not work out where you are. Most often it is the access setting or a weak signal:",
+  },
   "geo.lead.slow": {
-    ru: "Телефон пока не ответил. Если на экране был запрос на доступ к геолокации, выберите «Разрешить».",
-    en: "The phone has not answered yet. If a location request appeared on screen, choose Allow.",
+    ru: "Телефон пока не ответил. Если на экране был вопрос о доступе к геолокации, выберите «Разрешить». Если вопроса не было, проверьте доступ:",
+    en: "The phone has not answered yet. If a location question appeared on screen, choose Allow. If there was no question, check the access:",
   },
   "geo.lead.inapp": {
     ru: "Сайт открыт внутри другого приложения. Его встроенный браузер часто не отдаёт геолокацию.",
@@ -77,8 +88,12 @@ const STR = {
     en: "In the list below choose {app} → While Using the App and turn on Precise Location.",
   },
   "geo.ios.site": {
-    ru: "Вернитесь в Safari. Если доступ всё ещё закрыт, нажмите значок слева в адресной строке → «Настройки веб-сайта» → «Геопозиция» → «Разрешить».",
-    en: "Go back to Safari. If access is still closed, tap the icon at the left of the address bar → Website Settings → Location → Allow.",
+    ru: "Вернитесь в Safari. Если доступ всё ещё закрыт, нажмите значок слева в адресной строке (на новых iPhone потом ещё «•••») → «Настройки веб-сайта» → «Геопозиция» → «Разрешить».",
+    en: "Go back to Safari. If access is still closed, tap the icon at the left of the address bar (on newer iPhones then “•••”) → Website Settings → Location → Allow.",
+  },
+  "geo.ios.check": {
+    ru: "«Настройки» телефона → «Конфиденциальность и безопасность» → «Службы геолокации»: переключатель включён, а для «{app}» выбрано «При использовании приложения».",
+    en: "The phone's Settings → Privacy & Security → Location Services: the switch is on and {app} is set to While Using the App.",
   },
   "geo.ios.precise": {
     ru: "«Настройки» → «Конфиденциальность и безопасность» → «Службы геолокации» → «{app}»: включите «Точная геопозиция».",
@@ -95,6 +110,10 @@ const STR = {
   "geo.android.switch": {
     ru: "Проверьте, что в шторке быстрых настроек включено «Местоположение».",
     en: "Check that Location is on in the quick settings panel.",
+  },
+  "geo.android.check": {
+    ru: "В шторке быстрых настроек включено «Местоположение», а в «Настройки» → «Приложения» → «{app}» → «Разрешения» → «Местоположение» стоит «Разрешить только во время использования».",
+    en: "Location is on in the quick settings panel, and Settings → Apps → {app} → Permissions → Location is set to Allow only while using the app.",
   },
   "geo.android.precise": {
     ru: "«Настройки» → «Приложения» → «{app}» → «Разрешения» → «Местоположение»: включите «Использовать точное местоположение».",
@@ -133,7 +152,6 @@ const STR = {
     en: "Press Check again. When the request appears, choose Allow.",
   },
   "geo.step.back": { ru: "Вернитесь сюда и нажмите «Проверить снова».", en: "Come back here and press Check again." },
-  "geo.fail.on": { ru: "Проверьте, что геолокация на телефоне включена.", en: "Check that location is switched on in the phone." },
   "geo.fail.sky": {
     ru: "Выйдите на улицу или подойдите к окну: в помещении сигнал слабый.",
     en: "Step outside or move to a window: the signal is weak indoors.",
@@ -434,6 +452,7 @@ const STR = {
     en: "Hello! I will tell you stories about the places around you.",
   },
   "set.autoNext": { ru: "После истории сразу начинать следующую", en: "Start the next story right after the previous one" },
+  "set.build": { ru: "Версия приложения: {v}", en: "App version: {v}" },
   "set.about": {
     ru: "Места берутся из Википедии, Викиданных и OpenStreetMap. Истории по этим источникам пишет Claude. Он старается не выдумывать, но может ошибаться, поэтому под каждой историей есть ссылка на источник.",
     en: "Places come from Wikipedia, Wikidata and OpenStreetMap. Claude writes the stories from those sources. It tries not to make things up but can be wrong, so every story links to its source.",

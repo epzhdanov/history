@@ -451,7 +451,7 @@ def denied(browser):
     no = {"after": 30, "error": 1, "message": "User denied Geolocation"}
     app = App(browser, fake_geo={"coarse": no, "fine": no, "perm": "prompt"}, ua=IPHONE)
     page = app.open()
-    expect(page.locator(".plaque.warn")).to_contain_text("Нет доступа к геолокации", timeout=8000)
+    expect(page.locator(".plaque.warn")).to_contain_text("Телефон отказал в геолокации, не спросив вас", timeout=8000)
     expect(page.locator(".where-box")).to_be_visible()
     expect(page.locator(".pick-banner")).to_have_text("Нажмите на карту там, где стоите")
     app.shot("17-denied")
@@ -466,7 +466,9 @@ def denied(browser):
     expect(steps.nth(1)).to_contain_text("Сайты Safari")
     expect(steps.nth(2)).to_contain_text("Настройки веб-сайта")
     page.locator(".geo-diag summary").click()
-    expect(page.locator(".geo-diag pre")).to_contain_text("status: denied")
+    expect(page.locator(".geo-lead")).to_contain_text("не показав вам вопроса")
+    expect(page.locator(".geo-diag pre")).to_contain_text("build: 2026-")
+    expect(page.locator(".geo-diag pre")).to_contain_text("status: denied (no prompt)")
     expect(page.locator(".geo-diag pre")).to_contain_text("error: 1 ")
     expect(page.locator(".geo-diag pre")).to_contain_text("platform: ios safari")
     app.shot("18-geo-help")
@@ -487,7 +489,7 @@ def denied(browser):
     # Человек открыл доступ в настройках телефона и нажал "Проверить снова". На iPhone страница помнит отказ,
     # пока не перезагрузится, поэтому приложение перезагружает её само и после этого находит место.
     page.get_by_role("button", name="Вернуться ко мне").click()
-    expect(page.locator(".plaque.warn")).to_contain_text("Нет доступа к геолокации")
+    expect(page.locator(".plaque.warn")).to_contain_text("Телефон отказал в геолокации, не спросив вас")
     app.set_geo({"coarse": fix(*ROSSIO, 25), "fine": fix(*ROSSIO, 10, after=120), "perm": "granted"})
     page.get_by_role("button", name="Как включить").click()
     with page.expect_navigation():
@@ -508,7 +510,7 @@ def denied_return(browser):
     # Место уже выбрано вручную: возвращение на страницу ничего не перезагружает.
     app = App(browser, fake_geo={"coarse": no, "fine": no, "perm": "prompt"}, ua=IPHONE)
     page = app.open()
-    expect(page.locator(".plaque.warn")).to_contain_text("Нет доступа к геолокации", timeout=8000)
+    expect(page.locator(".plaque.warn")).to_contain_text("Телефон отказал в геолокации, не спросив вас", timeout=8000)
     box = page.locator("#map").bounding_box()
     page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     expect(page.locator(".plaque.here .plaque-link")).to_have_text("Вернуться ко мне", timeout=8000)
@@ -523,7 +525,7 @@ def denied_return(browser):
     # Терять нечего: страница перезагружается сама и находит место.
     app = App(browser, fake_geo={"coarse": no, "fine": no, "perm": "prompt"}, ua=IPHONE)
     page = app.open()
-    expect(page.locator(".plaque.warn")).to_contain_text("Нет доступа к геолокации", timeout=8000)
+    expect(page.locator(".plaque.warn")).to_contain_text("Телефон отказал в геолокации, не спросив вас", timeout=8000)
     app.set_geo(good)
     page.wait_for_timeout(3200)
     with page.expect_navigation():
@@ -538,14 +540,14 @@ def denied_then_allowed(browser):
     """Настоящий отказ браузера, потом доступ открыли в настройках. В Chrome место находится само, в Safari - после "Проверить снова"."""
     app = App(browser, geo=None, grant=False)
     page = app.open()
-    expect(page.locator(".plaque.warn")).to_contain_text("Нет доступа к геолокации", timeout=8000)
+    expect(page.locator(".plaque.warn")).to_contain_text("Телефон отказал в геолокации, не спросив вас", timeout=8000)
     assert app.kinds() == []
     app.ctx.grant_permissions(["geolocation"])
     app.ctx.set_geolocation({"latitude": ROSSIO[0], "longitude": ROSSIO[1], "accuracy": 10})
     if os.environ.get("E2E_BROWSER") == "webkit":
         # Движок Safari помнит отказ, пока страница не перезагрузится: тут помогает кнопка "Проверить снова".
         page.wait_for_timeout(1500)
-        expect(page.locator(".plaque.warn")).to_contain_text("Нет доступа к геолокации")
+        expect(page.locator(".plaque.warn")).to_contain_text("Телефон отказал в геолокации, не спросив вас")
         page.get_by_role("button", name="Как включить").click()
         with page.expect_navigation():
             page.locator("#geo-retry").click()
@@ -561,7 +563,7 @@ def denied_map_tap(browser):
     """Без геолокации место можно указать простым нажатием на карту, в том числе на вкладке маршрута."""
     app = App(browser, geo=None, grant=False, ua=ANDROID)
     page = app.open()
-    expect(page.locator(".plaque.warn")).to_contain_text("Нет доступа к геолокации", timeout=8000)
+    expect(page.locator(".plaque.warn")).to_contain_text("Телефон отказал в геолокации, не спросив вас", timeout=8000)
     page.get_by_role("button", name="Как включить").click()
     expect(page.locator(".geo-steps li").first).to_contain_text("Геоданные")
     expect(page.locator(".geo-steps li").nth(1)).to_contain_text("«Chrome»")
@@ -667,14 +669,51 @@ def geo_slow(browser):
     expect(page.locator(".where-box")).to_be_visible()
     page.clock.fast_forward(60000)
     expect(page.locator(".plaque.here")).to_contain_text("Телефон пока не ответил, где вы")  # пока браузер ждёт ответа человека, не сдаёмся
+    expect(page.get_by_role("button", name="Ещё раз")).to_be_visible()  # запрос можно повторить нажатием
     page.get_by_role("button", name="Что проверить").click()
     expect(page.locator(".geo-lead")).to_contain_text("выберите «Разрешить»")
+    expect(page.locator(".geo-steps li").first).to_contain_text("для «Сайты Safari» выбрано «При использовании приложения»")
+    page.locator(".sheet-head .icon-btn").click()
+    # Повтор нажатием: теперь телефон отвечает.
+    app.set_geo({"coarse": fix(*ROSSIO, 30), "fine": fix(*ROSSIO, 10, after=100), "perm": "granted"})
+    page.get_by_role("button", name="Ещё раз").click()
+    page.clock.fast_forward(4000)
+    expect(page.locator(".plaque.here .plaque-name")).to_have_text("Praça Dom Pedro IV", timeout=8000)
+    app.verify()
+    app.close()
+
+
+@scenario
+def denied_by_user(browser):
+    """Человек сам ответил "Не разрешать" на вопрос браузера: обычное сообщение, без слов про выключенные настройки."""
+    no = {"after": 1800, "error": 1, "message": "User denied Geolocation"}
+    app = App(browser, fake_geo={"coarse": no, "fine": no, "perm": "prompt"}, ua=IPHONE)
+    page = app.open()
+    expect(page.locator(".plaque.warn .plaque-text")).to_have_text("Нет доступа к геолокации", timeout=8000)
+    page.get_by_role("button", name="Как включить").click()
+    expect(page.locator(".geo-lead")).to_have_text("Сайту закрыт доступ к геолокации. Открыть его можно так:")
     app.verify()
     app.close()
 
 
 def story_text(page, i=0):
     return " ".join(page.locator(".story").nth(i).locator(".sent").all_inner_texts()).split()
+
+
+def voiced(calls, shown):
+    """Слова из запросов к сервису голоса в том порядке, в каком они идут в рассказе.
+
+    Запросы уходят по два сразу и записываются по мере ответа, поэтому в журнале соседние отрывки
+    могут поменяться местами. Звучат они всё равно по порядку: это проверяется отдельно, по подсветке.
+    """
+    text = " ".join(shown)
+
+    def where(c):
+        key = " ".join(c["text"].split()[:6])
+        at = text.find(key)
+        return at if at >= 0 else len(text)
+
+    return " ".join(c["text"] for c in sorted(calls, key=where)).split()
 
 
 @scenario
@@ -834,7 +873,8 @@ def voice_compat(browser):
     expect(page.locator(".s-end")).to_be_visible(timeout=30000)
     calls = app.tts.calls
     assert calls and all(c["legacy"] and c["style"] is None and c["model"] == "gemini-3.8-flash-lite-tts" for c in calls), calls[:2]
-    assert " ".join(c["text"] for c in calls).split() == story_text(page, 0)
+    shown = story_text(page, 0)
+    assert voiced(calls, shown) == shown, f"{[c['text'][:30] for c in calls]}"
     assert app.spoken() == [], app.spoken()
     app.verify(allow=("400", "429"))
     app.close()

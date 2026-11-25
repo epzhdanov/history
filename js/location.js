@@ -25,6 +25,7 @@ let status = "idle"; // idle | asking | ok | denied | unavailable | timeout | in
 let slow = false; // долго нет ответа, хотя отказа тоже нет
 let perm = "unknown"; // granted | prompt | denied | unknown
 let lastError = null; // { code, message, source }
+let silent = false; // телефон отказал сразу, не показав человеку вопроса
 let fineId = null;
 let coarseId = null;
 let run = 0; // номер запуска: ответы прежних запусков не учитываем
@@ -45,7 +46,7 @@ export function setReloadGuard(fn) {
 export const isRough = (p) => !!p && p.acc > ROUGH_M;
 
 function snapshot() {
-  return { pos: last, status, slow, rough: isRough(last), perm };
+  return { pos: last, status, slow, rough: isRough(last), perm, silent: status === "denied" && silent };
 }
 
 function emit() {
@@ -105,7 +106,9 @@ function onErr(my, source, e) {
   if (my !== run) return;
   lastError = { code: e?.code || 0, message: String(e?.message || ""), source };
   if (e?.code === 1) {
-    // Доступ закрыт: ждать больше нечего.
+    // Доступ закрыт: ждать больше нечего. Отказ быстрее, чем человек успел бы прочитать вопрос,
+    // значит, вопроса не было: доступ выключен в настройках.
+    silent = Date.now() - startedAt < 1500;
     perm = "denied";
     clearWatches();
     status = "denied";
@@ -176,6 +179,7 @@ export function startLocation() {
   clearWatches();
   fineFailed = coarseFailed = false;
   slow = false;
+  silent = false;
   lastError = null;
   status = last ? "ok" : "asking";
   emit();
@@ -282,6 +286,7 @@ export function locationInfo() {
   return {
     status,
     slow,
+    silent: status === "denied" && silent,
     perm,
     error: lastError,
     acc: last ? Math.round(last.acc) : null,

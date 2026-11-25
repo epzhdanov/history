@@ -5,6 +5,7 @@ import { t, getLang } from "./i18n.js";
 import { getKey, setKey, checkKey, errorText } from "./ai.js";
 import { speaker, voicesFor, voicesReady } from "./speech.js";
 import { openSheet, closeSheet } from "./sheet.js";
+import { BUILD } from "./build.js";
 import { PROVIDERS, GEMINI_VOICES, ttsChoice, setTtsChoice, ttsKey, setTtsKey, ttsModel, setTtsModel, ttsVoice, setTtsVoice, elevenVoices, loadElevenVoices, ttsErrorText } from "./tts.js";
 
 export const prefs = {
@@ -279,7 +280,8 @@ export function openSettings({ focusKey = false, onClose } = {}) {
     h("section", { class: "set-block", id: "set-voice-block" }, h("h3", null, t("set.voice")), voiceBox),
     h("section", { class: "set-block" }, h("h3", null, t("set.quality")), quality),
     h("section", { class: "set-block" }, h("h3", null, t("set.quiz")), quizSelect("kids"), quizSelect("adult")),
-    h("p", { class: "muted about" }, t("set.about"))
+    h("p", { class: "muted about" }, t("set.about")),
+    h("p", { class: "muted build" }, t("set.build", { v: BUILD }))
   );
   if (focusKey) requestAnimationFrame(() => key.input.focus());
 }
